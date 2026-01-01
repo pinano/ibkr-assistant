@@ -49,7 +49,7 @@ You will be prompted to enter:
 Configuration is managed in `.env` (generated from `.env.dist`). Key variables to note:
 
 *   `IB_FLEX_SCHEDULE_TIME`: Time to run the daily Flex Query (e.g., `07:30`).
-*   `CHECK_INTERVAL`: Frequency (in seconds) to check for cash balance changes and send alerts. Default: `300` (5 minutes). Database records are only inserted when changes are detected.
+*   `CASH_DIFFERENCE_CHECK_INTERVAL`: Frequency (in seconds) to check for cash balance changes and send alerts. Default: `300` (5 minutes). Database records are only inserted when changes are detected.
 *   `DB_INSERT_INTERVAL`: Frequency (in seconds) for periodic database snapshots. Default: `1800` (30 minutes). This ensures historical data is captured even without cash changes.
 *   `TELEGRAM_ALLOWED_IDS`: Authorization list for bot commands.
 *   `TRAEFIK_...`: If running behind a Traefik proxy.

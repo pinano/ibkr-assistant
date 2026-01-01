@@ -773,9 +773,9 @@ async def main():
     # 2. Schedule: Daily check for token expiry at 09:00
     scheduler.add_job(check_token_expiry, 'cron', hour=9, minute=0)
     
-    # 3. Schedule: Cash change detection (every CHECK_INTERVAL minutes)
+    # 3. Schedule: Cash change detection (every CASH_DIFFERENCE_CHECK_INTERVAL seconds)
     # This checks for cash balance changes but only inserts to DB if changes detected
-    check_interval_min = max(1, settings.CHECK_INTERVAL // 60)
+    check_interval_min = max(1, settings.CASH_DIFFERENCE_CHECK_INTERVAL // 60)
     scheduler.add_job(
         check_and_archive,  # force_insert defaults to False
         'cron', 
