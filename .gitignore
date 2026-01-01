@@ -1,0 +1,10 @@
+# Environment variables
+.env
+.env.save
+.env.bak
+
+# Data Directories
+flex_queries/*.xml
+mariadb_data/
+__pycache__/
+*.pyc

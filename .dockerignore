@@ -1,0 +1,10 @@
+mariadb_data/
+db_data/
+.env
+.git/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.db_data/
+.mariadb_data/

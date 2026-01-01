@@ -1,0 +1,123 @@
+services:
+
+  ibkr-gateway:
+    image: gnzsnz/ib-gateway:latest
+    restart: always
+    container_name: ${PROJECT_ID}-gateway
+
+    environment:
+      - TWS_USERID=${IB_USER}
+      - TWS_PASSWORD=${IB_PASS}
+      - TRADING_MODE=${MODE}
+      - VNC_SERVER_PASSWORD=${VNC_PASS}
+      - READ_ONLY_API=${READ_ONLY_API}
+      - TWOFA_TIMEOUT_ACTION=${TWOFA_TIMEOUT_ACTION}
+      - AUTO_RESTART_TIME=${AUTO_RESTART_TIME}
+      - TWS_COLD_RESTART=${TWS_COLD_RESTART}
+      - RELOGIN_AFTER_TWOFA_TIMEOUT=${RELOGIN_AFTER_TWOFA_TIMEOUT}
+      - EXISTING_SESSION_DETECTED_ACTION=${EXISTING_SESSION_DETECTED_ACTION}
+      - ALLOW_BLIND_TRADING=${ALLOW_BLIND_TRADING}
+      - TZ=${TZ}
+      - TIME_ZONE=${TZ}
+    networks:
+      - ibkr
+
+  ibkr-db:
+    image: mariadb:latest
+    restart: always
+    container_name: ${PROJECT_ID}-db
+
+    command: --default-authentication-plugin=mysql_native_password --default-time-zone=${TZ}
+    environment:
+      TZ: ${TZ}
+      MARIADB_ROOT_PASSWORD: ${DB_ROOT_PASS}
+      MARIADB_DATABASE: ${DB_NAME}
+      MARIADB_USER: ${DB_USER}
+      MARIADB_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - /etc/timezone:/etc/timezone:ro
+      - ./mariadb_data:/var/lib/mysql
+    ports:
+      - "127.0.0.1:${MARIADB_HOST_PORT}:3306"
+    healthcheck:
+      test: [ "CMD", "mariadb-admin", "ping", "-h", "localhost", "-u", "${DB_USER}", "--password=${DB_PASSWORD}" ]
+      interval: 2s
+      timeout: 2s
+      retries: 10
+      start_period: 5s
+    networks:
+      - ibkr
+
+  ibkr-api:
+    build: .
+    image: ibkr-app:latest
+    restart: always
+    container_name: ${PROJECT_ID}-api
+
+    environment:
+      - TZ=${TZ}
+      - PROJECT_ID=${PROJECT_ID}
+      - IB_PORT=${IB_PORT}
+      - IB_CLIENT_ID=${IB_CLIENT_ID}
+      - API_KEY=${API_KEY}
+    depends_on:
+      ibkr-db:
+        condition: service_healthy
+      ibkr-gateway:
+        condition: service_started
+    networks:
+      - traefik
+      - ibkr
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - /etc/timezone:/etc/timezone:ro
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.${PROJECT_ID}-api.rule=Host(`${DOMAIN}`)"
+      - "traefik.http.routers.${PROJECT_ID}-api.entrypoints=websecure"
+      - "traefik.http.routers.${PROJECT_ID}-api.tls=true"
+      - "traefik.http.routers.${PROJECT_ID}-api.tls.certresolver=${CERT_RESOLVER}"
+      - "traefik.http.services.${PROJECT_ID}-api.loadbalancer.server.port=8000"
+
+  ibkr-bot:
+    image: ibkr-app:latest
+    restart: always
+    container_name: ${PROJECT_ID}-bot
+
+    command: python -m src.bot
+    environment:
+      - TZ=${TZ}
+      - PROJECT_ID=${PROJECT_ID}
+      - TELEGRAM_TOKEN=${TG_TOKEN}
+      - TELEGRAM_ALLOWED_IDS=${TG_ALLOWED_IDS}
+      - API_KEY=${API_KEY}
+      - DB_URL=mysql+pymysql://${DB_USER}:${DB_PASSWORD}@${PROJECT_ID}-db/${DB_NAME}
+      - CHECK_INTERVAL=${CHECK_INTERVAL}
+      - DB_INSERT_INTERVAL=${DB_INSERT_INTERVAL}
+      - IB_FLEX_TOKEN=${IB_FLEX_TOKEN}
+      - IB_FLEX_QUERY_ID=${IB_FLEX_QUERY_ID}
+      - IB_FLEX_TOKEN_EXPIRY=${IB_FLEX_TOKEN_EXPIRY}
+      - EMAIL_SENDER=${EMAIL_SENDER}
+      - EMAIL_RECIPIENT=${EMAIL_RECIPIENT}
+      - EMAIL_SMTP_SERVER=${EMAIL_SMTP_SERVER}
+      - EMAIL_SMTP_PORT=${EMAIL_SMTP_PORT}
+      - EMAIL_SMTP_USER=${EMAIL_SMTP_USER}
+      - EMAIL_SMTP_PASSWORD=${EMAIL_SMTP_PASSWORD}
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - /etc/timezone:/etc/timezone:ro
+      - ./flex_queries:/app/flex_queries
+    depends_on:
+      ibkr-db:
+        condition: service_healthy
+      ibkr-api:
+        condition: service_started
+    networks:
+      - ibkr
+
+networks:
+  traefik:
+    external: true
+  ibkr:
+    driver: bridge
