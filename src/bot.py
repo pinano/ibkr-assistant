@@ -813,8 +813,7 @@ async def main():
     
     scheduler.start()
     
-    # Run the first check immediately (with forced DB insert to establish baseline)
-    await check_and_archive(force_insert=True)
+    # Initial checks (no forced DB inserts on startup to respect intervals)
     await check_token_expiry()
     
     await dp.start_polling(bot)
