@@ -773,33 +773,43 @@ async def main():
     # 2. Schedule: Daily check for token expiry at 09:00
     scheduler.add_job(check_token_expiry, 'cron', hour=9, minute=0)
     
-    # 3. Schedule: Cash change detection (every CASH_DIFFERENCE_CHECK_INTERVAL seconds)
-    # This checks for cash balance changes but only inserts to DB if changes detected
+    # Calculate intervals in minutes
     check_interval_min = max(1, settings.CASH_DIFFERENCE_CHECK_INTERVAL // 60)
-    scheduler.add_job(
-        check_and_archive,  # force_insert defaults to False
-        'cron', 
-        day_of_week='mon-fri',
-        hour='7-23',
-        minute=f'*/{check_interval_min}',
-        max_instances=1,
-        id='cash_change_check'
-    )
-    
-    # 4. Schedule: Periodic DB snapshots (every DB_INSERT_INTERVAL minutes)
-    # This always inserts a record for historical tracking
     db_insert_interval_min = max(1, settings.DB_INSERT_INTERVAL // 60)
+
+    # 3. Schedule: Periodic DB snapshots (Fixed time, e.g. :00, :30)
+    # We want these to happen EXACTLY at the interval marks
+    snap_mins = set(range(0, 60, db_insert_interval_min)) if db_insert_interval_min < 60 else {0}
+    snap_cron = ",".join(map(str, sorted(snap_mins)))
+
     scheduler.add_job(
         lambda: check_and_archive(force_insert=True),
         'cron',
         day_of_week='mon-fri',
         hour='7-23',
-        minute=f'*/{db_insert_interval_min}',
+        minute=snap_cron,
         max_instances=1,
         id='periodic_db_snapshot'
     )
+
+    # 4. Schedule: Cash change detection
+    # Run at check intervals BUT skip minutes where a snapshot (forced insert) creates a redundancy
+    check_mins = set(range(0, 60, check_interval_min)) if check_interval_min < 60 else {0}
+    effective_check_mins = check_mins - snap_mins
     
-    logger.info(f"Scheduler configured: cash check every {check_interval_min}min, DB snapshot every {db_insert_interval_min}min")
+    if effective_check_mins:
+        check_cron = ",".join(map(str, sorted(effective_check_mins)))
+        scheduler.add_job(
+            check_and_archive,  # force_insert defaults to False
+            'cron', 
+            day_of_week='mon-fri',
+            hour='7-23',
+            minute=check_cron,
+            max_instances=1,
+            id='cash_change_check'
+        )
+    
+    logger.info(f"Scheduler configured: Snapshots at mins={snap_cron}, Checks at mins={check_cron if effective_check_mins else 'None'}")
     
     scheduler.start()
     
