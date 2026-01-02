@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
 from aiogram.utils.keyboard import InlineKeyboardBuilder
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, func
 from sqlalchemy.orm import sessionmaker
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from src.flex import FlexReporter
@@ -158,7 +158,7 @@ async def check_and_archive(force_insert: bool = False):
     except Exception as e: 
         logger.error(f"Monitoring Job Error: {e}")
 
-@dp.message(Command("nav"))
+@dp.message(Command("nav", ignore_case=True))
 async def cmd_nav(m: types.Message):
     if m.from_user.id not in settings.allowed_ids_list: return
     
@@ -197,7 +197,7 @@ async def cmd_nav(m: types.Message):
             msg = str(e) or repr(e)
             await m.answer(f"❌ Error: {msg}")
 
-@dp.message(Command("pos"))
+@dp.message(Command("pos", ignore_case=True))
 async def cmd_pos(m: types.Message):
     if m.from_user.id not in settings.allowed_ids_list: return
     
@@ -255,7 +255,7 @@ async def cmd_pos(m: types.Message):
             msg = str(e) or repr(e)
             await m.answer(f"❌ Error: {msg}")
 
-@dp.message(Command("options"))
+@dp.message(Command("options", ignore_case=True))
 async def cmd_options(m: types.Message):
     if m.from_user.id not in settings.allowed_ids_list: return
     
@@ -363,7 +363,7 @@ async def process_opt_details(callback: types.CallbackQuery):
 
 
 
-@dp.message(Command("max"))
+@dp.message(Command("max", ignore_case=True))
 async def cmd_max(m: types.Message):
     if m.from_user.id not in settings.allowed_ids_list: return
     
@@ -415,7 +415,52 @@ async def cmd_max(m: types.Message):
             msg = str(e) or repr(e)
             await m.answer(f"❌ Error: {msg}")
 
-@dp.message(Command("help"))
+@dp.message(Command("today", ignore_case=True))
+async def cmd_today(m: types.Message):
+    if m.from_user.id not in settings.allowed_ids_list: return
+    
+    async with httpx.AsyncClient(timeout=30) as client:
+        try:
+            # 1. Fetch Real-time Summary
+            r = await client.get(f"{settings.WEB_SERVICE_URL}/account/summary", headers=API_HEADERS)
+            r.raise_for_status()
+            realtime_data = r.json()
+            curr_val = float(realtime_data.get('NetLiquidation', 0))
+            
+            # 2. Query today's min/max from DB
+            session = SessionLocal()
+            try:
+                today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+                
+                # Get Min and Max for today
+                stats = session.query(
+                    func.min(CashBalance.nav).label('min_nav'),
+                    func.max(CashBalance.nav).label('max_nav')
+                ).filter(CashBalance.date >= today_start).one()
+                
+                min_val = float(stats.min_nav or curr_val)
+                max_val = float(stats.max_nav or curr_val)
+                
+                # Adjust with current value if it's more extreme than what's in DB today
+                min_val = min(min_val, curr_val)
+                max_val = max(max_val, curr_val)
+                
+                msg = (
+                    f"📅 *Daily NAV Range*\n"
+                    f"🔹 Min: `{min_val:.2f}`\n"
+                    f"🔸 Max: `{max_val:.2f}`\n"
+                    f"💰 Current: `{curr_val:.2f}`"
+                )
+                await m.answer(msg, parse_mode="Markdown")
+            finally:
+                session.close()
+                
+        except Exception as e:
+            logger.error(f"Error in cmd_today: {e}")
+            msg = str(e) or repr(e)
+            await m.answer(f"❌ Error: {msg}")
+
+@dp.message(Command("help", ignore_case=True))
 async def cmd_help(m: types.Message):
     if m.from_user.id not in settings.allowed_ids_list: return
     
@@ -430,13 +475,14 @@ async def cmd_help(m: types.Message):
         "🔗 /chain SYMBOL - Show option chain\n"
         "📑 /options - Interactive options dashboard\n"
         "🏆 /max - Show All Time High\n"
+        "📊 /today - Today's NAV Min/Max/Current\n"
         "📊 /flex [PARAM] - Manual Flex Report (PARAM: monthly|YYYYMMDD)\n"
         "❓ /help - Show this help message"
     )
 
     await m.answer(help_text, parse_mode="Markdown")
 
-@dp.message(Command("orders"))
+@dp.message(Command("orders", ignore_case=True))
 async def cmd_orders(m: types.Message):
     if m.from_user.id not in settings.allowed_ids_list: return
     
@@ -464,7 +510,7 @@ async def cmd_orders(m: types.Message):
             msg = str(e) or repr(e)
             await m.answer(f"❌ Error: {msg}")
 
-@dp.message(Command("trades"))
+@dp.message(Command("trades", ignore_case=True))
 async def cmd_trades(m: types.Message):
     if m.from_user.id not in settings.allowed_ids_list: return
     
@@ -494,7 +540,7 @@ async def cmd_trades(m: types.Message):
             msg = str(e) or repr(e)
             await m.answer(f"❌ Error: {msg}")
 
-@dp.message(Command("quote"))
+@dp.message(Command("quote", ignore_case=True))
 async def cmd_quote(m: types.Message):
     if m.from_user.id not in settings.allowed_ids_list: return
     
@@ -544,7 +590,7 @@ async def cmd_quote(m: types.Message):
             txt = str(e) or repr(e)
             await msg.edit_text(f"❌ Error: {txt}")
 
-@dp.message(Command("contract"))
+@dp.message(Command("contract", ignore_case=True))
 async def cmd_contract(m: types.Message):
     if m.from_user.id not in settings.allowed_ids_list: return
     
@@ -585,7 +631,7 @@ async def cmd_contract(m: types.Message):
             msg = str(e) or repr(e)
             await m.answer(f"❌ Error: {msg}")
 
-@dp.message(Command("chain"))
+@dp.message(Command("chain", ignore_case=True))
 async def cmd_chain(m: types.Message):
     if m.from_user.id not in settings.allowed_ids_list: return
     
@@ -763,7 +809,7 @@ async def scheduled_flex_report(query_id=None, report_type="Daily", retry_count=
         else:
              await notify_admins(f"❌ Local {report_type} Flex Query Exception: {e}")
 
-@dp.message(Command("flex"))
+@dp.message(Command("flex", ignore_case=True))
 async def cmd_flex(m: types.Message):
     if m.from_user.id not in settings.allowed_ids_list: return
     

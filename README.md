@@ -85,6 +85,7 @@ The project includes convenience scripts for lifecycle management:
 | `/contract <SMBL>` | **Contract**: Search for contract details (ConID, Exchange). |
 | `/options` | **Options Dashboard**: Interactive list of option positions grouped by expiry. Click details to see **Greeks** (Δ, Θ, etc.). |
 | `/max` | **All-Time High**: Compares current NAV against the historical maximum recorded in the DB. |
+| `/today` | **Daily Range**: Show today's Min, Max, and Current NAV. |
 | `/flex` | **Daily Flex Report**: Manually trigger the daily Flex Query report immediately. |
 | `/flex monthly` | **Monthly Flex Report**: Manually trigger the monthly Flex Query report. |
 | `/flex YYYYMMDD` | **Local Flex Report**: Reprocess a previously archived XML file (e.g., `/flex 20251225`). |
