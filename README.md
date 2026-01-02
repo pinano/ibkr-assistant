@@ -49,6 +49,8 @@ You will be prompted to enter:
 Configuration is managed in `.env` (generated from `.env.dist`). Key variables to note:
 
 *   `IB_FLEX_SCHEDULE_TIME`: Time to run the daily Flex Query (e.g., `07:30`).
+*   `IB_FLEX_DAILY_QUERY_ID`: Your daily Flex Query ID.
+*   `IB_FLEX_MONTHLY_QUERY_ID`: Your monthly Flex Query ID (runs on the 1st of each month at 12:00).
 *   `CASH_DIFFERENCE_CHECK_INTERVAL`: Frequency (in seconds) to check for cash balance changes and send alerts. Default: `300` (5 minutes). Database records are only inserted when changes are detected.
 *   `DB_INSERT_INTERVAL`: Frequency (in seconds) for periodic database snapshots. Default: `1800` (30 minutes). This ensures historical data is captured even without cash changes.
 *   `TELEGRAM_ALLOWED_IDS`: Authorization list for bot commands.
@@ -83,7 +85,8 @@ The project includes convenience scripts for lifecycle management:
 | `/contract <SMBL>` | **Contract**: Search for contract details (ConID, Exchange). |
 | `/options` | **Options Dashboard**: Interactive list of option positions grouped by expiry. Click details to see **Greeks** (Δ, Θ, etc.). |
 | `/max` | **All-Time High**: Compares current NAV against the historical maximum recorded in the DB. |
-| `/flex` | **Flex Query**: Manually trigger the Flex Query download and report immediately. |
+| `/flex` | **Daily Flex Report**: Manually trigger the daily Flex Query report immediately. |
+| `/flex monthly` | **Monthly Flex Report**: Manually trigger the monthly Flex Query report. |
 | `/flex YYYYMMDD` | **Local Flex Report**: Reprocess a previously archived XML file (e.g., `/flex 20251225`). |
 | `/help` | Show the list of available commands. |
 

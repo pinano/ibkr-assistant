@@ -425,12 +425,12 @@ async def cmd_help(m: types.Message):
         "📦 /pos - Show current positions\n"
         "📋 /orders - Show active open orders\n"
         "🤝 /trades - Show today's executions\n"
-        "📈 /quote <SMBL> - Get real-time price snapshot\n"
-        "📄 /contract <SMBL> - Search contract details\n"
-        "🔗 /chain <SMBL> - Show option chain\n"
+        "📈 /quote SYMBOL - Real-time price snapshot\n"
+        "📄 /contract SYMBOL - Search contract details\n"
+        "🔗 /chain SYMBOL - Show option chain\n"
         "📑 /options - Interactive options dashboard\n"
         "🏆 /max - Show All Time High\n"
-        "📊 /flex - Manual Flex Query Report\n"
+        "📊 /flex [PARAM] - Manual Flex Report (PARAM: monthly|YYYYMMDD)\n"
         "❓ /help - Show this help message"
     )
 
