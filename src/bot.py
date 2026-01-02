@@ -683,40 +683,57 @@ async def check_token_expiry():
     except Exception as e:
         logger.error(f"Error checking token expiry: {e}")
 
-async def scheduled_flex_report(retry_count=0, local_date=None):
+async def scheduled_flex_report(query_id=None, report_type="Daily", retry_count=0, local_date=None):
     attempt_str = f" (Attempt {retry_count + 1})" if not local_date else f" (Local: {local_date})"
-    logger.info(f"Running scheduled Flex Query Report{attempt_str}...")
+    logger.info(f"Running scheduled {report_type} Flex Query Report{attempt_str}...")
     try:
         # Run blocking report generation in a thread
-        # Now returns (html, date_range, telegram_msgs, archive_status)
-        html, date_range, telegram_msgs, archive_status = await asyncio.to_thread(FlexReporter.run_report, local_date=local_date)
+        # Now returns (html, date_range_html, date_range_subject, telegram_msgs, archive_status)
+        html, date_range_html, date_range_subject, telegram_msgs, archive_status = await asyncio.to_thread(
+            FlexReporter.run_report, 
+            query_id=query_id, 
+            local_date=local_date,
+            report_type=report_type
+        )
         
-        if not date_range:
-            logger.warning(f"Flex Query failed: {html}") # Log warning instead of error for retries
+        if not date_range_html:
+            logger.warning(f"{report_type} Flex Query failed: {html}") # Log warning instead of error for retries
             
             # Retry only if it's a scheduled run (not local)
             if not local_date:
                 if retry_count < 10:
                     next_run = datetime.now() + timedelta(hours=1)
-                    scheduler.add_job(scheduled_flex_report, 'date', run_date=next_run, args=[retry_count + 1])
-                    logger.info(f"Rescheduled Flex Report retry #{retry_count + 1} for {next_run}")
+                    scheduler.add_job(
+                        scheduled_flex_report, 
+                        'date', 
+                        run_date=next_run, 
+                        args=[query_id, report_type, retry_count + 1]
+                    )
+                    logger.info(f"Rescheduled {report_type} Flex Report retry #{retry_count + 1} for {next_run}")
                     return
                 else:
-                    logger.error(f"Flex Query failed after 10 retries: {html}")
-                    await notify_admins(f"⚠️ Flex Query Report Error (Failed after 10 attempts): {html}")
+                    logger.error(f"{report_type} Flex Query failed after 10 retries: {html}")
+                    await notify_admins(f"⚠️ {report_type} Flex Query Report Error (Failed after 10 attempts): {html}")
                     return
             else:
-                await notify_admins(f"❌ Local Flex Query Error: {html}")
+                await notify_admins(f"❌ Local {report_type} Flex Query Error: {html}")
                 return
 
         # Run blocking email sending in a thread
         project_prefix = settings.PROJECT_ID.upper()
-        subject = f"{project_prefix} - IB Flex Query {date_range}" if not local_date else f"{project_prefix} - IB Flex Query {date_range} (Local Re-run)"
+        if report_type == "Monthly":
+            subject = f"{project_prefix} - IB Flex Query {date_range_subject}"
+        else:
+            subject = f"{project_prefix} - IB {report_type} Flex Query {date_range_html}"
+
+        if local_date:
+            subject += " (Local Re-run)"
+
         email_status = await asyncio.to_thread(FlexReporter.send_email, html, subject)
         
         # Send Telegram Messages (Summary + Dividends etc)
         # Ensure date is shown first as requested
-        await notify_admins(f"📅 *Flex Query Date*: `{date_range}`")
+        await notify_admins(f"📅 *{report_type} Flex Query Date*: `{date_range_html}`")
 
         for msg in telegram_msgs:
             if msg.strip():
@@ -727,37 +744,47 @@ async def scheduled_flex_report(retry_count=0, local_date=None):
         
         # Send simple completion status with Archiving info
         await notify_admins(
-            f"📊 *Report Generated*\nDate: {date_range}\nArchived: {archive_status}\nEmail: {email_status}"
+            f"📊 *{report_type} Report Generated*\nDate: {date_range_html}\nArchived: {archive_status}\nEmail: {email_status}"
         )
     except Exception as e:
-        logger.error(f"Scheduler/Report Error: {e}")
+        logger.error(f"{report_type} Scheduler/Report Error: {e}")
         if not local_date:
             if retry_count < 10:
                 next_run = datetime.now() + timedelta(hours=1)
-                scheduler.add_job(scheduled_flex_report, 'date', run_date=next_run, args=[retry_count + 1])
-                logger.info(f"Rescheduled Flex Report retry #{retry_count + 1} (due to error) for {next_run}")
+                scheduler.add_job(
+                    scheduled_flex_report, 
+                    'date', 
+                    run_date=next_run, 
+                    args=[query_id, report_type, retry_count + 1]
+                )
+                logger.info(f"Rescheduled {report_type} Flex Report retry #{retry_count + 1} (due to error) for {next_run}")
             else:
-                 await notify_admins(f"⚠️ Flex Query System Error (Failed after 10 attempts): {e}")
+                 await notify_admins(f"⚠️ {report_type} Flex Query System Error (Failed after 10 attempts): {e}")
         else:
-             await notify_admins(f"❌ Local Flex Query Exception: {e}")
+             await notify_admins(f"❌ Local {report_type} Flex Query Exception: {e}")
 
 @dp.message(Command("flex"))
 async def cmd_flex(m: types.Message):
     if m.from_user.id not in settings.allowed_ids_list: return
     
     args = m.text.split()
-    local_date = None
     if len(args) > 1:
-        local_date = args[1].strip()
+        arg = args[1].lower().strip()
+        if arg == "monthly":
+            await m.answer("Generating Monthly Flex Query Report... ⏳")
+            await scheduled_flex_report(query_id=settings.IB_FLEX_MONTHLY_QUERY_ID, report_type="Monthly")
+            return
+            
+        local_date = arg
         # Basic validation
         if not (len(local_date) == 8 and local_date.isdigit()):
-             await m.answer("❌ Invalid format. Use /flex YYYYMMDD (e.g. /flex 20251229)")
+             await m.answer("❌ Invalid format. Use /flex YYYYMMDD (e.g. /flex 20251229) or /flex monthly")
              return
         await m.answer(f"Processing local report for {local_date}.xml ... ⏳")
         await scheduled_flex_report(local_date=local_date)
     else:
-        await m.answer("Generating Flex Query Report... ⏳")
-        await scheduled_flex_report()
+        await m.answer("Generating Daily Flex Query Report... ⏳")
+        await scheduled_flex_report(query_id=settings.IB_FLEX_DAILY_QUERY_ID, report_type="Daily")
 
 async def main():
     # 1. Schedule: Tue,Wed,Thu,Fri,Sat for Flex Query Reports
@@ -768,7 +795,25 @@ async def main():
         logger.error(f"Invalid IB_FLEX_SCHEDULE_TIME format: {settings.IB_FLEX_SCHEDULE_TIME}. Defaulting to 07:30")
         sh, sm = 7, 30
 
-    scheduler.add_job(scheduled_flex_report, 'cron', day_of_week='tue,wed,thu,fri,sat', hour=sh, minute=sm)
+    # Daily Flex Query: Tue,Wed,Thu,Fri,Sat
+    scheduler.add_job(
+        scheduled_flex_report, 
+        'cron', 
+        day_of_week='tue,wed,thu,fri,sat', 
+        hour=sh, 
+        minute=sm,
+        args=[settings.IB_FLEX_DAILY_QUERY_ID, "Daily"]
+    )
+    
+    # Monthly Flex Query: 1st of each month at 12:00
+    scheduler.add_job(
+        scheduled_flex_report,
+        'cron',
+        day='1',
+        hour=12,
+        minute=0,
+        args=[settings.IB_FLEX_MONTHLY_QUERY_ID, "Monthly"]
+    )
     
     # 2. Schedule: Daily check for token expiry at 09:00
     scheduler.add_job(check_token_expiry, 'cron', hour=9, minute=0)

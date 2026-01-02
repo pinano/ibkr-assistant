@@ -39,7 +39,8 @@ class Settings(BaseSettings):
 
     # Flex Query & Email (Only required by Bot)
     IB_FLEX_TOKEN: str = ""
-    IB_FLEX_QUERY_ID: str = ""
+    IB_FLEX_DAILY_QUERY_ID: str = ""
+    IB_FLEX_MONTHLY_QUERY_ID: str = ""
     IB_FLEX_TOKEN_EXPIRY: str = ""
     IB_FLEX_SCHEDULE_TIME: str = "07:30"
     

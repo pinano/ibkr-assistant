@@ -18,15 +18,16 @@ def sortchildrenby(parent, attr_1, attr_2=None):
 def fmt_num(val, precision=2):
     try:
         f = float(val)
-        return ('{:.' + str(precision) + 'f}').format(round(f, precision))
+        # Spanish numbering system uses comma as decimal separator
+        return ('{:.' + str(precision) + 'f}').format(round(f, precision)).replace('.', ',')
     except:
         return val
 
 class FlexReporter:
     @staticmethod
-    def run_report(token=None, query_id=None, local_date=None):
+    def run_report(token=None, query_id=None, local_date=None, report_type="Daily"):
         token = token or settings.IB_FLEX_TOKEN
-        query_id = query_id or settings.IB_FLEX_QUERY_ID
+        query_id = query_id or settings.IB_FLEX_DAILY_QUERY_ID
         
         old_stdout = sys.stdout
         result = StringIO()
@@ -61,7 +62,7 @@ class FlexReporter:
                     tree = ET.ElementTree(ET.fromstring(response))
                     root = tree.getroot()
                 except Exception as e:
-                    return f"Error downloading/parsing Flex Query: {e}", None, [], None
+                    return f"Error downloading/parsing Flex Query: {e}", None, None, [], None
 
             # 2. Archiving (Only if not local)
             archive_status = "Skipped (Local)"
@@ -73,8 +74,9 @@ class FlexReporter:
                     flex_stmt = root.find('.//FlexStatement')
                     f_date = flex_stmt.get('fromDate')
                     # t_date = flex_stmt.get('toDate')
-                    # User requested YYYYMMDD.xml format
-                    arch_filename = f"{f_date.replace('-', '')}.xml"
+                    # User requested YYYYMMDD.xml format, add -monthly suffix if applicable
+                    suffix = "-monthly" if report_type == "Monthly" else ""
+                    arch_filename = f"{f_date.replace('-', '')}{suffix}.xml"
                     full_path = os.path.join(archive_dir, arch_filename)
                     
                     with open(full_path, 'w') as f:
@@ -91,8 +93,16 @@ class FlexReporter:
             # Date range
             fromDate = root.find('.//FlexStatement').get('fromDate')
             toDate = root.find('.//FlexStatement').get('toDate')
-            dateRange = fromDate + ' to ' + toDate if fromDate != toDate else fromDate
-            print('<h1>' + dateRange + ': Cash Transactions Report</h1>')
+            
+            # Format for HTML (with hyphens)
+            dateRangeHTML = fromDate + ' to ' + toDate if fromDate != toDate else fromDate
+            
+            # Format for Subject (without hyphens)
+            f_clean = fromDate.replace('-', '')
+            t_clean = toDate.replace('-', '')
+            dateRangeSubject = f_clean + ' to ' + t_clean if f_clean != t_clean else f_clean
+            
+            print('<h1>' + dateRangeHTML + ': Cash Transactions Report</h1>')
 
             # CashReport
             summary_msg = "Flex Query Report\n" + "-" * 12 + "\n"
@@ -183,7 +193,7 @@ class FlexReporter:
                 
                 print(f'<tr class="{cls}">')
                 print(f'<td class="r">{at("symbol").rjust(4)}</td><td>{at("exDate")}</td><td>{at("payDate")}</td><td>{at("currency")}</td>')
-                print(f'<td class="r">{at("quantity").rjust(3)}</td><td class="r">{fmt_num(at("grossRate"), 3)}</td><td class="r">{fmt_num(at("grossAmount"), 3)}</td>')
+                print(f'<td class="r">{fmt_num(at("quantity"), 0).rjust(3)}</td><td class="r">{fmt_num(at("grossRate"), 3)}</td><td class="r">{fmt_num(at("grossAmount"), 3)}</td>')
                 print(f'<td class="r">{fmt_num(at("tax"), 3)}</td><td class="r">{fmt_num(taxpct, 2)}%</td><td class="r">{fmt_num(at("netAmount"), 3)}</td>')
                 print(f'<td>{at("description")}</td><td class="r">{at("listingExchange")}</td></tr>')
             print('</tbody></table>')
@@ -201,8 +211,8 @@ class FlexReporter:
                 taxpct = (tax * 100) / (qty * grate) if (qty * grate) != 0 else 0
                 print(f'<tr class="{"even" if i % 2 else "odd"}">')
                 print(f'<td class="r">{at("symbol").rjust(4)}</td><td>{at("exDate")}</td><td>{at("payDate")}</td><td>{at("currency")}</td>')
-                print(f'<td class="r">{at("quantity").rjust(3)}</td><td class="r">{fmt_num(at("grossRate"), 3)}</td><td class="r">{fmt_num(at("grossAmount"), 3)}</td>')
-                print(f'<td class="r">{fmt_num(at("tax"), 3)}</td><td class="r">{fmt_num(taxpct, 2)}%</td><td class="r">{at("netAmount")}</td>')
+                print(f'<td class="r">{fmt_num(at("quantity"), 0).rjust(3)}</td><td class="r">{fmt_num(at("grossRate"), 3)}</td><td class="r">{fmt_num(at("grossAmount"), 3)}</td>')
+                print(f'<td class="r">{fmt_num(at("tax"), 3)}</td><td class="r">{fmt_num(taxpct, 2)}%</td><td class="r">{fmt_num(at("netAmount"), 3)}</td>')
                 print(f'<td>{at("description")}</td><td class="r">{at("listingExchange")}</td></tr>')
             print('</tbody></table>')
 
@@ -215,7 +225,7 @@ class FlexReporter:
                 at = a.get
                 print(f'<tr class="{"even" if i % 2 else "odd"}">')
                 print(f'<td>{at("valueDate")}</td><td>{at("currency")}</td><td class="r">{fmt_num(at("totalPrincipal"))}</td>')
-                print(f'<td>{fmt_num(at("fxRateToBase"), 7)}</td><td class="r">{at("rate")}%</td><td>{at("totalInterest")}</td><td>{at("interestType")}</td></tr>')
+                print(f'<td>{fmt_num(at("fxRateToBase"), 7)}</td><td class="r">{fmt_num(at("rate"))}%</td><td>{fmt_num(at("totalInterest"))}</td><td>{at("interestType")}</td></tr>')
             print('</tbody></table>')
 
             # Trades
@@ -233,9 +243,9 @@ class FlexReporter:
                 
                 print(f'<tr class="{cls}">')
                 print(f'<td class="r">{at("symbol")}</td><td>{at("tradeDate")}</td><td class="c">{at("buySell")}</td><td>{at("currency")}</td>')
-                print(f'<td>{fmt_num(at("fxRateToBase"), 7)}</td><td class="r">{at("quantity")}</td><td class="r">{fmt_num(u_price, 4)}</td>')
+                print(f'<td>{fmt_num(at("fxRateToBase"), 7)}</td><td class="r">{fmt_num(at("quantity"))}</td><td class="r">{fmt_num(u_price, 4)}</td>')
                 print(f'<td class="r">{fmt_num(-1*comm, 8)}</td><td class="c">{at("ibCommissionCurrency")}</td><td class="r">{fmt_num(at("netCash"), 8)}</td>')
-                print(f'<td>{at("description")}</td><td class="r">{at("underlyingSymbol")}</td><td class="r">{at("multiplier").replace(".",",")}</td>')
+                print(f'<td>{at("description")}</td><td class="r">{at("underlyingSymbol")}</td><td class="r">{fmt_num(at("multiplier"))}</td>')
                 print(f'<td class="r">{fmt_num(at("strike"), 2) if at("strike") else ""}</td><td>{at("expiry")}</td><td class="c">{at("putCall")}</td>')
                 print(f'<td class="c">{at("exchange")}</td><td class="c">{at("listingExchange")}</td><td class="c">{at("underlyingListingExchange")}</td></tr>')
             print('</tbody></table>')
@@ -259,11 +269,11 @@ class FlexReporter:
 
         except Exception as e:
             sys.stdout = old_stdout
-            return f"Error generating report: {e}", None, [], None
+            return f"Error generating report: {e}", None, None, [], None
         
         sys.stdout = old_stdout
         html_content = result.getvalue()
-        return html_content, dateRange, telegram_msgs, archive_status
+        return html_content, dateRangeHTML, dateRangeSubject, telegram_msgs, archive_status
 
     @staticmethod
     def send_email(html_content, subject):
