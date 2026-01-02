@@ -783,11 +783,12 @@ async def main():
     snap_cron = ",".join(map(str, sorted(snap_mins)))
 
     scheduler.add_job(
-        lambda: check_and_archive(force_insert=True),
+        check_and_archive,
         'cron',
         day_of_week='mon-fri',
         hour='7-23',
         minute=snap_cron,
+        args=[True],  # force_insert=True
         max_instances=1,
         id='periodic_db_snapshot'
     )
