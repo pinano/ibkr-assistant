@@ -432,23 +432,28 @@ async def cmd_today(m: types.Message):
             try:
                 today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
                 
-                # Get Min and Max for today
-                stats = session.query(
-                    func.min(CashBalance.nav).label('min_nav'),
-                    func.max(CashBalance.nav).label('max_nav')
-                ).filter(CashBalance.date >= today_start).one()
+                # Get records for min and max today
+                min_rec = session.query(CashBalance).filter(CashBalance.date >= today_start).order_by(CashBalance.nav.asc()).first()
+                max_rec = session.query(CashBalance).filter(CashBalance.date >= today_start).order_by(CashBalance.nav.desc()).first()
                 
-                min_val = float(stats.min_nav or curr_val)
-                max_val = float(stats.max_nav or curr_val)
+                min_val = float(min_rec.nav) if min_rec else curr_val
+                min_time = min_rec.date.strftime("%H:%M") if min_rec else datetime.now().strftime("%H:%M")
+                
+                max_val = float(max_rec.nav) if max_rec else curr_val
+                max_time = max_rec.date.strftime("%H:%M") if max_rec else datetime.now().strftime("%H:%M")
                 
                 # Adjust with current value if it's more extreme than what's in DB today
-                min_val = min(min_val, curr_val)
-                max_val = max(max_val, curr_val)
+                if curr_val < min_val:
+                    min_val = curr_val
+                    min_time = f"{datetime.now().strftime('%H:%M')} (Now)"
+                if curr_val > max_val:
+                    max_val = curr_val
+                    max_time = f"{datetime.now().strftime('%H:%M')} (Now)"
                 
                 msg = (
                     f"📅 *Daily NAV Range*\n"
-                    f"🔹 Min: `{min_val:.2f}`\n"
-                    f"🔸 Max: `{max_val:.2f}`\n"
+                    f"🔹 Min: `{min_val:.2f}` (at {min_time})\n"
+                    f"🔸 Max: `{max_val:.2f}` (at {max_time})\n"
                     f"💰 Current: `{curr_val:.2f}`"
                 )
                 await m.answer(msg, parse_mode="Markdown")
