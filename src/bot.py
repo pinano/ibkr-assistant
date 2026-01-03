@@ -436,11 +436,20 @@ async def cmd_today(m: types.Message):
                 min_rec = session.query(CashBalance).filter(CashBalance.date >= today_start).order_by(CashBalance.nav.asc()).first()
                 max_rec = session.query(CashBalance).filter(CashBalance.date >= today_start).order_by(CashBalance.nav.desc()).first()
                 
-                min_val = float(min_rec.nav) if min_rec else curr_val
-                min_time = min_rec.date.strftime("%H:%M") if min_rec else datetime.now().strftime("%H:%M")
+                if not min_rec:
+                    msg = (
+                        f"📅 *Daily NAV Range*\n"
+                        f"📭 No hay registros en la base de datos para el día de hoy.\n"
+                        f"💰 Current: `{curr_val:.2f}`"
+                    )
+                    await m.answer(msg, parse_mode="Markdown")
+                    return
+
+                min_val = float(min_rec.nav)
+                min_time = min_rec.date.strftime("%H:%M")
                 
-                max_val = float(max_rec.nav) if max_rec else curr_val
-                max_time = max_rec.date.strftime("%H:%M") if max_rec else datetime.now().strftime("%H:%M")
+                max_val = float(max_rec.nav)
+                max_time = max_rec.date.strftime("%H:%M")
                 
                 # Adjust with current value if it's more extreme than what's in DB today
                 if curr_val < min_val:
