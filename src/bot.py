@@ -439,7 +439,7 @@ async def cmd_today(m: types.Message):
                 if not min_rec:
                     msg = (
                         f"📅 *Daily NAV Range*\n"
-                        f"📭 No hay registros en la base de datos para el día de hoy.\n"
+                        f"📭 No records found in the database for today.\n"
                         f"💰 Current: `{curr_val:.2f}`"
                     )
                     await m.answer(msg, parse_mode="Markdown")
