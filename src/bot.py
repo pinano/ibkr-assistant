@@ -572,7 +572,7 @@ async def cmd_help(m: types.Message):
         "📑 /options - Interactive options dashboard\n"
         "🏆 /max - Show All Time High\n"
         "📊 /today - Today's NAV Min/Max/Current\n"
-        "📅 /year [YYYY] - Year's NAV Min/Max/Diff\n"
+        "📅 /year [YYYY] - Year's NAV Min/Max/Diff/Var%\n"
         "📊 /flex [PARAM] - Manual Flex Report (PARAM: monthly|YYYYMMDD)\n"
         "❓ /help - Show this help message"
     )
