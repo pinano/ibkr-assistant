@@ -474,6 +474,88 @@ async def cmd_today(m: types.Message):
             msg = str(e) or repr(e)
             await m.answer(f"❌ Error: {msg}")
 
+@dp.message(Command("year", ignore_case=True))
+async def cmd_year(m: types.Message):
+    if m.from_user.id not in settings.allowed_ids_list: return
+    
+    args = m.text.split()
+    target_year = datetime.now().year
+    if len(args) > 1:
+        try:
+            target_year = int(args[1])
+        except ValueError:
+            await m.answer("❌ Invalid year format. Use `/year YYYY`.", parse_mode="Markdown")
+            return
+
+    async with httpx.AsyncClient(timeout=30) as client:
+        try:
+            # 1. Fetch Real-time Summary
+            curr_val = None
+            r = await client.get(f"{settings.WEB_SERVICE_URL}/account/summary", headers=API_HEADERS)
+            if r.status_code == 200:
+                realtime_data = r.json()
+                curr_val = float(realtime_data.get('NetLiquidation', 0))
+            
+            # 2. Query year's min/max and first/last from DB
+            session = SessionLocal()
+            try:
+                year_start = datetime(target_year, 1, 1)
+                year_end = datetime(target_year, 12, 31, 23, 59, 59)
+                
+                # Get records for min and max in the year
+                min_rec = session.query(CashBalance).filter(CashBalance.date >= year_start, CashBalance.date <= year_end).order_by(CashBalance.nav.asc()).first()
+                max_rec = session.query(CashBalance).filter(CashBalance.date >= year_start, CashBalance.date <= year_end).order_by(CashBalance.nav.desc()).first()
+                
+                # Get first and last records to calculate variation
+                first_rec = session.query(CashBalance).filter(CashBalance.date >= year_start, CashBalance.date <= year_end).order_by(CashBalance.date.asc()).first()
+                last_db_rec = session.query(CashBalance).filter(CashBalance.date >= year_start, CashBalance.date <= year_end).order_by(CashBalance.date.desc()).first()
+
+                if not first_rec and (curr_val is None or target_year != datetime.now().year):
+                    await m.answer(f"📭 No records found for year {target_year}.")
+                    return
+
+                min_val = float(min_rec.nav) if min_rec else curr_val
+                max_val = float(max_rec.nav) if max_rec else curr_val
+                
+                # Adjust with current value if it's the current year
+                if target_year == datetime.now().year and curr_val is not None:
+                    if min_val is None or curr_val < min_val:
+                        min_val = curr_val
+                    if max_val is None or curr_val > max_val:
+                        max_val = curr_val
+                
+                diff = max_val - min_val if max_val is not None and min_val is not None else 0
+                
+                # Variation calculation
+                first_nav = float(first_rec.nav) if first_rec else curr_val
+                # If current year, the "last" value for variation is the current real-time value
+                # Otherwise, it's the last recorded value in that year
+                last_nav = curr_val if (target_year == datetime.now().year and curr_val is not None) else (float(last_db_rec.nav) if last_db_rec else curr_val)
+                
+                variation_pct = 0.0
+                if first_nav and first_nav != 0:
+                    variation_pct = ((last_nav - first_nav) / first_nav) * 100
+
+                msg = (
+                    f"📅 *NAV Range for {target_year}*\n"
+                    f"🔹 Min: `{min_val:.2f}`\n"
+                    f"🔸 Max: `{max_val:.2f}`\n"
+                    f"📊 Max Diff: `{diff:.2f}`\n"
+                    f"📈 Variation: `{variation_pct:+.2f}%`"
+                )
+                
+                if curr_val is not None and target_year == datetime.now().year:
+                    msg += f"\n💰 Total Actual: `{curr_val:.2f}`"
+                
+                await m.answer(msg, parse_mode="Markdown")
+            finally:
+                session.close()
+                
+        except Exception as e:
+            logger.error(f"Error in cmd_year: {e}")
+            msg = str(e) or repr(e)
+            await m.answer(f"❌ Error: {msg}")
+
 @dp.message(Command("help", ignore_case=True))
 async def cmd_help(m: types.Message):
     if m.from_user.id not in settings.allowed_ids_list: return
@@ -490,6 +572,7 @@ async def cmd_help(m: types.Message):
         "📑 /options - Interactive options dashboard\n"
         "🏆 /max - Show All Time High\n"
         "📊 /today - Today's NAV Min/Max/Current\n"
+        "📅 /year [YYYY] - Year's NAV Min/Max/Diff\n"
         "📊 /flex [PARAM] - Manual Flex Report (PARAM: monthly|YYYYMMDD)\n"
         "❓ /help - Show this help message"
     )
