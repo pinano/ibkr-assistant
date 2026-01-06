@@ -491,68 +491,88 @@ async def cmd_year(m: types.Message):
         try:
             # 1. Fetch Real-time Summary
             curr_val = None
-            r = await client.get(f"{settings.WEB_SERVICE_URL}/account/summary", headers=API_HEADERS)
-            if r.status_code == 200:
-                realtime_data = r.json()
-                curr_val = float(realtime_data.get('NetLiquidation', 0))
+            try:
+                r = await client.get(f"{settings.WEB_SERVICE_URL}/account/summary", headers=API_HEADERS)
+                if r.status_code == 200:
+                    realtime_data = r.json()
+                    curr_val = float(realtime_data.get('NetLiquidation', 0))
+            except Exception as e:
+                logger.warning(f"Could not fetch real-time NAV: {e}")
             
-            # 2. Query year's min/max and first/last from DB
+            # 2. Query year data from DB
             session = SessionLocal()
             try:
                 year_start = datetime(target_year, 1, 1)
                 year_end = datetime(target_year, 12, 31, 23, 59, 59)
                 
-                # Get records for min and max in the year
+                # Period Start
+                first_rec = session.query(CashBalance).filter(CashBalance.date >= year_start, CashBalance.date <= year_end).order_by(CashBalance.date.asc()).first()
+                # Period End
+                last_db_rec = session.query(CashBalance).filter(CashBalance.date >= year_start, CashBalance.date <= year_end).order_by(CashBalance.date.desc()).first()
+                # Min/Max in DB
                 min_rec = session.query(CashBalance).filter(CashBalance.date >= year_start, CashBalance.date <= year_end).order_by(CashBalance.nav.asc()).first()
                 max_rec = session.query(CashBalance).filter(CashBalance.date >= year_start, CashBalance.date <= year_end).order_by(CashBalance.nav.desc()).first()
-                
-                # Get first and last records to calculate variation
-                first_rec = session.query(CashBalance).filter(CashBalance.date >= year_start, CashBalance.date <= year_end).order_by(CashBalance.date.asc()).first()
-                last_db_rec = session.query(CashBalance).filter(CashBalance.date >= year_start, CashBalance.date <= year_end).order_by(CashBalance.date.desc()).first()
 
                 if not first_rec and (curr_val is None or target_year != datetime.now().year):
                     await m.answer(f"📭 No records found for year {target_year}.")
                     return
 
-                min_val = float(min_rec.nav) if min_rec else curr_val
-                max_val = float(max_rec.nav) if max_rec else curr_val
-                
-                # Adjust with current value if it's the current year
+                # Calculate Start
+                start_nav = float(first_rec.nav) if first_rec else curr_val
+                start_date = first_rec.date.strftime("%Y-%m-%d") if first_rec else "Now"
+
+                # Calculate End
+                is_now = False
                 if target_year == datetime.now().year and curr_val is not None:
-                    if min_val is None or curr_val < min_val:
+                    end_nav = curr_val
+                    end_date = "Now"
+                    is_now = True
+                else:
+                    end_nav = float(last_db_rec.nav) if last_db_rec else start_nav
+                    end_date = last_db_rec.date.strftime("%Y-%m-%d") if last_db_rec else start_date
+
+                period_var = ((end_nav - start_nav) / start_nav * 100) if start_nav else 0
+
+                # Calculate Min/Max (including current if applicable)
+                min_val = float(min_rec.nav) if min_rec else curr_val
+                min_date = min_rec.date.strftime("%Y-%m-%d") if min_rec else "Now"
+                
+                max_val = float(max_rec.nav) if max_rec else curr_val
+                max_date = max_rec.date.strftime("%Y-%m-%d") if max_rec else "Now"
+
+                if target_year == datetime.now().year and curr_val is not None:
+                    if curr_val < min_val:
                         min_val = curr_val
-                    if max_val is None or curr_val > max_val:
+                        min_date = "Now"
+                    if curr_val > max_val:
                         max_val = curr_val
-                
-                diff = max_val - min_val if max_val is not None and min_val is not None else 0
-                
-                # Variation calculation
-                first_nav = float(first_rec.nav) if first_rec else curr_val
-                # If current year, the "last" value for variation is the current real-time value
-                # Otherwise, it's the last recorded value in that year
-                last_nav = curr_val if (target_year == datetime.now().year and curr_val is not None) else (float(last_db_rec.nav) if last_db_rec else curr_val)
-                
-                variation_pct = 0.0
-                if first_nav and first_nav != 0:
-                    variation_pct = ((last_nav - first_nav) / first_nav) * 100
+                        max_date = "Now"
+
+                range_var = ((max_val - min_val) / min_val * 100) if min_val else 0
 
                 msg = (
-                    f"📅 *NAV Range for {target_year}*\n"
-                    f"🔹 Min: `{min_val:.2f}`\n"
-                    f"🔸 Max: `{max_val:.2f}`\n"
-                    f"📊 Max Diff: `{diff:.2f}`\n"
-                    f"📈 Variation: `{variation_pct:+.2f}%`"
+                    f"📅 *NAV Analysis for {target_year}*\n\n"
+                    f"🏁 *Period:*\n"
+                    f"• Start: `{start_nav:.2f}` ({start_date})\n"
+                    f"• End:   `{end_nav:.2f}` ({end_date}{' - Act' if is_now else ''})\n"
+                    f"• Var:   `{period_var:+.2f}%`"
                 )
                 
-                if curr_val is not None and target_year == datetime.now().year:
-                    msg += f"\n💰 Total Actual: `{curr_val:.2f}`"
+                msg += "\n\n-------------------\n\n"
+
+                msg += (
+                    f"📊 *Range:*\n"
+                    f"• Min:   `{min_val:.2f}` ({min_date})\n"
+                    f"• Max:   `{max_val:.2f}` ({max_date})\n"
+                    f"• Var:   `{range_var:+.2f}%`"
+                )
                 
                 await m.answer(msg, parse_mode="Markdown")
             finally:
                 session.close()
                 
         except Exception as e:
-            logger.error(f"Error in cmd_year: {e}")
+            logger.error(f"Error in cmd_year: {e}", exc_info=True)
             msg = str(e) or repr(e)
             await m.answer(f"❌ Error: {msg}")
 
