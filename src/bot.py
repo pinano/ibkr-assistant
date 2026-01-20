@@ -1018,7 +1018,19 @@ async def main():
             id='cash_change_check'
         )
     
-    logger.info(f"Scheduler configured: Snapshots at mins={snap_cron}, Checks at mins={check_cron if effective_check_mins else 'None'}")
+    # 5. Schedule: Weekend cash control points (Sat, Sun at 12:00)
+    scheduler.add_job(
+        check_and_archive,
+        'cron',
+        day_of_week='sat,sun',
+        hour=12,
+        minute=0,
+        args=[True],  # force_insert=True
+        max_instances=1,
+        id='weekend_cash_control'
+    )
+    
+    logger.info(f"Scheduler configured: Snapshots at mins={snap_cron}, Checks at mins={check_cron if effective_check_mins else 'None'}, Weekend at 12:00")
     
     scheduler.start()
     
