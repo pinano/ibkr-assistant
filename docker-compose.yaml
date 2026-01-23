@@ -36,7 +36,6 @@ services:
       MARIADB_PASSWORD: ${DB_PASSWORD}
     volumes:
       - /etc/localtime:/etc/localtime:ro
-      - /etc/timezone:/etc/timezone:ro
       - ./mariadb_data:/var/lib/mysql
     ports:
       - "127.0.0.1:${MARIADB_HOST_PORT}:3306"
@@ -72,7 +71,6 @@ services:
       - ibkr
     volumes:
       - /etc/localtime:/etc/localtime:ro
-      - /etc/timezone:/etc/timezone:ro
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.${PROJECT_ID}-api.rule=Host(`${DOMAIN}`)"
@@ -110,7 +108,6 @@ services:
       - EMAIL_SMTP_PASSWORD=${EMAIL_SMTP_PASSWORD}
     volumes:
       - /etc/localtime:/etc/localtime:ro
-      - /etc/timezone:/etc/timezone:ro
       - ./flex_queries:/app/flex_queries
     depends_on:
       ibkr-db:
