@@ -54,6 +54,7 @@ services:
     image: ibkr-app:latest
     restart: always
     container_name: ${PROJECT_ID}-api
+    user: "${USER_ID}:${GROUP_ID}"
 
     environment:
       - TZ=${TZ}
@@ -84,6 +85,7 @@ services:
     image: ibkr-app:latest
     restart: always
     container_name: ${PROJECT_ID}-bot
+    user: "${USER_ID}:${GROUP_ID}"
 
     command: python -m src.bot
     environment:
