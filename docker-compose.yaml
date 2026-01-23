@@ -1,7 +1,7 @@
 services:
 
   ibkr-gateway:
-    image: gnzsnz/ib-gateway:latest
+    image: gnzsnz/ib-gateway:stable
     restart: always
     container_name: ${PROJECT_ID}-gateway
 
