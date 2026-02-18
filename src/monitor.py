@@ -20,9 +20,6 @@ class Monitor:
         logger.info("Checking alerts...")
         session = self.SessionLocal()
         try:
-            # 1. Custom Alerts (Database)
-            alerts = session.query(Alert).filter(Alert.triggered == 0).all()
-
             # 2. Global Monitoring (All Open Options)
             # Fetch all positions first
             headers = {"X-API-Key": settings.API_KEY}
@@ -49,11 +46,8 @@ class Monitor:
                     if con_id:
                         option_map[con_id] = p
 
-                # Collect symbols to check from DB Alerts
-                custom_symbols = set(a.symbol for a in alerts)
-
-                if not custom_symbols and not option_map:
-                    logger.info("No symbols to monitor.")
+                if not option_map:
+                    logger.info("No options to monitor.")
                     return
 
                 # Fetch Greeks for all open options via /option/greeks
@@ -74,52 +68,6 @@ class Monitor:
                     except Exception as e:
                         logger.debug(
                             f"Error fetching greeks for conId={con_id}: {e}")
-
-                # Fetch data for custom DB alert symbols (these use the old
-                # endpoint)
-                custom_data = {}
-                for symbol in custom_symbols:
-                    try:
-                        url = f"{settings.WEB_SERVICE_URL}/option/risk/{symbol}"
-                        r = await client.get(url, headers=headers)
-                        if r.status_code == 200:
-                            custom_data[symbol] = r.json()
-                    except Exception as e:
-                        logger.debug(f"Error fetching data for {symbol}: {e}")
-
-            # --- Evaluate Custom DB Alerts ---
-            for alert in alerts:
-                data = custom_data.get(alert.symbol)
-                if not data:
-                    continue
-
-                metric_map = {
-                    'delta': 'delta', 'gamma': 'gamma', 'vega': 'vega', 'theta': 'theta',
-                    'iv': 'implied_vol', 'price': 'last_price', 'underlying': 'underlying_price'
-                }
-                metric_key = metric_map.get(alert.metric.lower())
-                current_value = data.get(metric_key) if metric_key else None
-
-                if current_value is None:
-                    continue
-
-                triggered = False
-                if alert.condition == '>':
-                    triggered = current_value > alert.threshold
-                elif alert.condition == '<':
-                    triggered = current_value < alert.threshold
-
-                if triggered:
-                    logger.info(f"Custom Alert {alert.id} triggered: {alert.symbol}")
-                    msg = (
-                        f"🚨 <b>Custom Alert!</b>\n"
-                        f"🔹 <code>{alert.symbol}</code>\n"
-                        f"🔹 Rule: <code>{alert.metric} {alert.condition} {alert.threshold}</code>\n"
-                        f"🔸 Value: <code>{current_value:.4f}</code>"
-                    )
-                    await notify_admins(msg, parse_mode="HTML")
-                    alert.triggered = 1
-                    session.commit()
 
             # --- Evaluate Global Rules (Automated) ---
             # Rule: High Delta Warning — only for SHORT positions (sold options)

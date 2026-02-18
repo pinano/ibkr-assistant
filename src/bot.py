@@ -10,7 +10,7 @@ from sqlalchemy.orm import sessionmaker
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from src.flex import FlexReporter
 from src.config import settings
-from src.models import Base, CashBalance, Alert
+from src.models import Base, CashBalance
 from src.monitor import Monitor
 
 # Logging
@@ -1053,113 +1053,7 @@ async def cmd_flex(m: types.Message):
         await m.answer("Generating Daily Flex Query Report... ⏳")
         await scheduled_flex_report(query_id=settings.IB_FLEX_DAILY_QUERY_ID, report_type="Daily")
 
-# --- Alert Commands ---
 
-
-@dp.message(Command("alert", ignore_case=True))
-async def cmd_alert(m: types.Message):
-    logger.info(
-        f"Received /alert command from user {m.from_user.id}: {m.text}")
-    if m.from_user.id not in settings.allowed_ids_list:
-        logger.warning(f"Unauthorized /alert attempt from {m.from_user.id}")
-        return
-
-    args = m.text.split()
-    if len(args) < 2:
-        await m.answer(
-            "ℹ️ *Alert Commands:*\n"
-            "• `/alert list` - Show active alerts\n"
-            "• `/alert add <SYMBOL> <METRIC> <COND> <VAL>`\n"
-            "   (e.g. `/alert add ASTS delta > 0.5`)\n"
-            "• `/alert del <ID>` - Delete alert by ID",
-            parse_mode="Markdown"
-        )
-        return
-
-    action = args[1].lower()
-
-    session = SessionLocal()
-    try:
-        if action == "list":
-            alerts = session.query(Alert).all()
-            if not alerts:
-                await m.answer("📭 No alerts set.")
-                return
-
-            msg = "🚨 *Active Alerts:*\n"
-            for a in alerts:
-                status = "✅" if a.triggered == 0 else "❌ (Triggered)"
-                msg += f"• <b>ID {a.id}</b>: <code>{a.symbol} {a.metric} {a.condition} {a.threshold}</code> {status}\n"
-            await m.answer(msg, parse_mode="HTML")
-
-        elif action == "add":
-            # Usage: /alert add ASTS delta > 0.5
-            if len(args) < 6:
-                await m.answer("❌ Usage: `/alert add <SYMBOL> <METRIC> <COND> <VAL>`")
-                return
-
-            symbol = args[2].upper()
-            metric = args[3].lower()
-            cond = args[4]
-            try:
-                val = float(args[5])
-            except ValueError:
-                await m.answer("❌ Value must be a number.")
-                return
-
-            if cond not in ('>', '<'):
-                await m.answer("❌ Condition must be > or <.")
-                return
-
-            valid_metrics = [
-                'delta',
-                'gamma',
-                'vega',
-                'theta',
-                'iv',
-                'price',
-                'underlying']
-            if metric not in valid_metrics:
-                await m.answer(f"❌ Metric must be one of: {', '.join(valid_metrics)}")
-                return
-
-            alert = Alert(
-                symbol=symbol,
-                metric=metric,
-                condition=cond,
-                threshold=val)
-            session.add(alert)
-            session.commit()
-            await m.answer(f"✅ Alert added: `{symbol} {metric} {cond} {val}`", parse_mode="Markdown")
-
-        elif action == "del":
-            if len(args) < 3:
-                await m.answer("❌ Usage: `/alert del <ID>`")
-                return
-
-            try:
-                a_id = int(args[2])
-            except ValueError:
-                await m.answer("❌ ID must be a number.")
-                return
-
-            alert = session.query(Alert).filter(Alert.id == a_id).first()
-            if not alert:
-                await m.answer(f"❌ Alert ID {a_id} not found.")
-                return
-
-            session.delete(alert)
-            session.commit()
-            await m.answer(f"🗑️ Alert {a_id} deleted.")
-
-        else:
-            await m.answer("❌ Unknown action. Use `add`, `list`, or `del`.")
-
-    except Exception as e:
-        logger.error(f"Error in /alert: {e}", exc_info=True)
-        await m.answer(f"❌ Error: {e}")
-    finally:
-        session.close()
 
 
 @dp.message(Command("delta", ignore_case=True))

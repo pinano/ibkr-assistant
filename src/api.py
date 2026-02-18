@@ -390,7 +390,8 @@ async def get_option_greeks(
                     underlying_price=snap.underlying_price or 0.0,
                     last_price=snap.last_price or 0.0,
                     volume=0,
-                    open_interest=0
+                    open_interest=0,
+                    last_date=snap.updated_at.strftime("%Y-%m-%d %H:%M:%S") if snap.updated_at else None
                 )
             elif not force_refresh and snap and snap.updated_at > datetime.now() - \
                     timedelta(minutes=60) and not _snap_is_valid(snap):
@@ -576,7 +577,7 @@ async def get_option_greeks(
                 t_oi is not None and not math.isnan(t_oi)) else 0,
             last_price=t_last if (
                 t_last is not None and not math.isnan(t_last)) else 0.0,
-            last_date=t_time.strftime("%Y-%m-%d %H:%M:%S") if t_time else None
+            last_date=t_time.strftime("%Y-%m-%d %H:%M:%S") if t_time else datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         )
 
     except Exception as e:
