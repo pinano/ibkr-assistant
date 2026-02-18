@@ -100,6 +100,8 @@ def parse_symbol(symbol: str) -> tuple:
             ticker = symbol[:-len(suffix)]
             return (ticker, exchange, currency)
 
+
+
     # Default: US stock
     return (symbol, "SMART", "USD")
 
@@ -449,6 +451,30 @@ async def get_option_greeks(
                             qualified = res
                             logger.info(f"Qualified option {underlying} {expiry} {strike} {right} via parallel fallback (currency={res[0].currency})")
                             break
+
+                    if not qualified or not qualified[0]:
+                        # Dynamic Fallback: Search for the underlying symbol
+                        logger.info(f"Performing dynamic symbol search for {underlying}...")
+                        descriptions = await client.reqMatchingSymbolsAsync(underlying)
+
+                        best_match = None
+                        for d in descriptions:
+                            if d.contract.secType == 'STK' and d.contract.symbol == underlying:
+                                best_match = d.contract
+                                break
+
+                        if best_match:
+                            logger.info(f"Found match: {best_match.symbol} on {best_match.primaryExchange or best_match.exchange} ({best_match.currency})")
+                            # Try to qualify option using the specific currency from the stock
+                            c = Option(
+                                ticker,
+                                expiry,
+                                strike,
+                                right,
+                                'SMART',
+                                currency=best_match.currency)
+                            # Sometimes the exchange also needs to be explicit if SMART fails, but usually currency is enough for top liquid stocks
+                            qualified = await client.qualifyContractsAsync(c)
         except Exception as e:
             logger.warning(f"Live qualification failed: {e}")
             if snap:
