@@ -3,6 +3,7 @@ import os
 import asyncio
 import logging
 import math
+import httpx
 from datetime import datetime
 from typing import List
 from fastapi import FastAPI, HTTPException, Security, Depends
@@ -104,6 +105,88 @@ def parse_symbol(symbol: str) -> tuple:
 
     # Default: US stock
     return (symbol, "SMART", "USD")
+
+
+async def _fetch_cboe_greeks(ticker: str, expiry: str, strike: float, right: str):
+    """
+    Fetch Greeks from CBOE (delayed quotes).
+    Returns OptionGreeks object or None if not found/error.
+    """
+    try:
+        # 1. Parse Ticker for CBOE (Indices need special handling)
+        cboe_ticker = ticker.upper()
+        # Common indices on CBOE often need an underscore prefix if accessing via certain endpoints,
+        # but the delayed_quotes endpoint usually takes the symbol directly.
+        # However, for consistency with some CBOE conventions:
+        if cboe_ticker in ['SPX', 'VIX', 'RUT', 'NDX', 'OEX', 'DJX']:
+            cboe_ticker = f"_{cboe_ticker}"
+
+        url = f"https://cdn.cboe.com/api/global/delayed_quotes/options/{cboe_ticker}.json"
+        
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            r = await client.get(url)
+            if r.status_code != 200:
+                return None
+            data = r.json()
+
+        if not data or 'data' not in data or 'options' not in data['data']:
+            return None
+
+        # 2. Construct Option ID (OCC format)
+        # Format: TICKER + YYMMDD + C/P + 00000000 (strike * 1000)
+        # Expiry is YYYYMMDD, need YYMMDD
+        yy_expiry = expiry[2:] 
+        strike_int = int(round(strike * 1000))
+        strike_str = f"{strike_int:08d}"
+        
+        # Ticker in OCC ID should not have special chars usually, but CBOE API response 
+        # 'option' field matches the CBOE ticker format.
+        # If ticker was 'SPX', option ID starts with 'SPX'.
+        clean_ticker = ticker.upper().replace('.', '')
+        # Special case: N.Y -> NY, etc.
+
+        option_id = f"{clean_ticker}{yy_expiry}{right}{strike_str}"
+        
+        # 3. Find the option in the list
+        option_data = None
+        for opt in data['data']['options']:
+            if opt['option'] == option_id:
+                option_data = opt
+                break
+        
+        if not option_data:
+            return None
+
+        # 4. Map to OptionGreeks
+        # CBOE fields: delta, gamma, theta, iv, open_interest, volume, last_trade_price, last_trade_time
+        
+        def val_or_zero(val):
+            if val is None: return 0.0
+            if isinstance(val, str):
+                try: 
+                    return float(val) 
+                except: 
+                    return 0.0
+            return float(val)
+
+        return OptionGreeks(
+            symbol=f"{ticker} {expiry} {strike} {right} (CBOE)",
+            delta=abs(val_or_zero(option_data.get('delta'))),
+            gamma=val_or_zero(option_data.get('gamma')),
+            vega=val_or_zero(option_data.get('vega')),
+            theta=abs(val_or_zero(option_data.get('theta'))),
+            implied_vol=val_or_zero(option_data.get('iv')),
+            underlying_price=val_or_zero(data.get('data', {}).get('current_price')), # Underlying price from top level
+            last_price=val_or_zero(option_data.get('last_trade_price')),
+            volume=int(val_or_zero(option_data.get('volume'))),
+            open_interest=int(val_or_zero(option_data.get('open_interest'))),
+            last_date=option_data.get('last_trade_time') or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        )
+
+    except Exception as e:
+        logger.debug(f"CBOE Fetch failed for {ticker}: {e}")
+        return None
+
 
 
 def _greeks_are_valid(g, und_price_override=None):
@@ -404,7 +487,26 @@ async def get_option_greeks(
         try:
             client = await get_ib()
             client.reqMarketDataType(4)
+                logger.warning(f"Cached data for conId={conId} has invalid Greeks, forcing live fetch")
 
+        # 2b. Check CBOE (for US options largely)
+        # We try this BEFORE connecting to IBKR if we don't have a valid cache.
+        # This is a "best effort" attempt.
+        if not force_refresh:
+            # Simple heuristic: if it looks like a US ticker (no suffix), try CBOE
+            # or if we explicitly know it's US.
+            is_likely_us = '.' not in underlying or underlying in ['SPX', 'VIX', 'NDX', 'RUT']
+            
+            if is_likely_us:
+                try:
+                    cboe_data = await _fetch_cboe_greeks(underlying, expiry, strike, right)
+                    if cboe_data:
+                        logger.info(f"Fetched Greeks from CBOE for {underlying} {expiry} {strike} {right}")
+                        return cboe_data
+                except Exception as e:
+                    logger.debug(f"CBOE check failed: {e}")
+
+        # 3. If we get here, we want live data (or cache was stale)
             if conId:
                 contract = Option(conId=conId)
                 qualified = await client.qualifyContractsAsync(contract)
