@@ -25,6 +25,10 @@ start:
 stop:
 	@bash src/stop.sh
 
+restart:
+	@bash src/stop.sh
+	@bash src/start.sh
+
 rebuild:
 	$(COMPOSE) build --no-cache $(s)
 	$(COMPOSE) up -d --force-recreate --remove-orphans $(s)

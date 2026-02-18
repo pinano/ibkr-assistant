@@ -13,7 +13,7 @@ from ib_async import IB, Option, Contract, ExecutionFilter
 from src.config import settings
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, Session
-from src.models import AccountSummary, PositionItem, CurrencyItem, OptionGreeks, OrderItem, TradeItem, ContractDetailsItem, MarketSnapshot, OptionChainItem, OptionSnapshot, MarketCache
+from src.models import AccountSummary, PositionItem, CurrencyItem, OptionGreeks, OrderItem, TradeItem, MarketSnapshot, OptionChainItem, OptionSnapshot, MarketCache
 
 # Logging Setup
 logging.basicConfig(level=logging.INFO)
@@ -171,10 +171,10 @@ async def _fetch_cboe_greeks(ticker: str, expiry: str, strike: float, right: str
 
         return OptionGreeks(
             symbol=f"{ticker} {expiry} {strike} {right} (CBOE)",
-            delta=abs(val_or_zero(option_data.get('delta'))),
+            delta=val_or_zero(option_data.get('delta')),
             gamma=val_or_zero(option_data.get('gamma')),
             vega=val_or_zero(option_data.get('vega')),
-            theta=abs(val_or_zero(option_data.get('theta'))),
+            theta=val_or_zero(option_data.get('theta')),
             implied_vol=val_or_zero(option_data.get('iv')),
             underlying_price=val_or_zero(data.get('data', {}).get('current_price')), # Underlying price from top level
             last_price=val_or_zero(option_data.get('last_trade_price')),
@@ -394,6 +394,93 @@ async def get_currencies():
         if v.tag == 'CashBalance' and v.currency != 'BASE'
     ]
 
+async def _qualify_option_contract(
+    client,
+    ticker: str,
+    expiry: str,
+    strike: float,
+    right: str,
+    currency: str = "USD"
+):
+    """
+    Attempt to qualify an option contract using multiple strategies:
+    1. Exact match with provided currency.
+    2. Exact match with alternative currencies (USD, EUR, GBP, CHF).
+    3. Dynamic symbol search (reqMatchingSymbols) to find correct exchange/currency.
+    
+    Returns:
+        List of qualified contracts (or empty/None if failed).
+    """
+    # 1. Try with provided currency (default or parsed)
+    contract = Option(
+        ticker,
+        expiry,
+        strike,
+        right,
+        'SMART',
+        currency=currency)
+    
+    try:
+        qualified = await client.qualifyContractsAsync(contract)
+        if qualified and qualified[0]:
+            return qualified
+    except Exception:
+        pass
+
+    # 2. Try alternative currencies in parallel
+    alt_currencies = [
+        c for c in ['USD', 'EUR', 'GBP', 'CHF'] 
+        if c != currency
+    ]
+    
+    tasks = []
+    for alt in alt_currencies:
+        c = Option(
+            ticker,
+            expiry,
+            strike,
+            right,
+            'SMART',
+            currency=alt)
+        tasks.append(client.qualifyContractsAsync(c))
+
+    if tasks:
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        for res in results:
+            if isinstance(res, list) and res and res[0]:
+                logger.info(f"Qualified option {ticker} via fallback currency={res[0].currency}")
+                return res
+
+    # 3. Dynamic Fallback: Search for the underlying symbol
+    logger.info(f"Performing dynamic symbol search for {ticker}...")
+    try:
+        descriptions = await client.reqMatchingSymbolsAsync(ticker)
+        
+        best_match = None
+        for d in descriptions:
+            # We want the stock contract that matches the ticker
+            if d.contract.secType == 'STK' and d.contract.symbol == ticker:
+                best_match = d.contract
+                break
+        
+        if best_match:
+            logger.info(f"Found match: {best_match.symbol} on {best_match.primaryExchange or best_match.exchange} ({best_match.currency})")
+            # Try to qualify using the specific currency/exchange from the stock
+            c = Option(
+                ticker,
+                expiry,
+                strike,
+                right,
+                'SMART',
+                currency=best_match.currency)
+            q = await client.qualifyContractsAsync(c)
+            if q and q[0]:
+                return q
+    except Exception as e:
+        logger.warning(f"Dynamic lookup failed for {ticker}: {e}")
+
+    return None
+
 
 @app.get("/option/greeks", response_model=OptionGreeks,
          dependencies=[Depends(verify_key)])
@@ -516,69 +603,19 @@ async def get_option_greeks(
                     logger.info(f"Qualified option via conId={conId}")
 
             if not qualified or not qualified[0]:
-                # Fallback: try symbol-based qualification with parse_symbol
+                # Parse ticker (handling suffixes) to get correct currency/exchange info
                 ticker, _, currency = parse_symbol(underlying)
-                contract = Option(
-                    ticker,
-                    expiry,
-                    strike,
-                    right,
-                    'SMART',
-                    currency=currency)
-                qualified = await client.qualifyContractsAsync(contract)
+                
+                # Use the helper to qualify the contract
+                qualified = await _qualify_option_contract(
+                    client, 
+                    ticker, 
+                    expiry, 
+                    strike, 
+                    right, 
+                    currency
+                )
 
-                # Fallback: try symbol-based qualification via parallel
-                # execution for other currencies
-                if not qualified or not qualified[0]:
-                    alt_currencies = [
-                        c for c in [
-                            'USD',
-                            'EUR',
-                            'GBP',
-                            'CHF'] if c != currency]
-                    tasks = []
-                    for alt in alt_currencies:
-                        c = Option(
-                            ticker,
-                            expiry,
-                            strike,
-                            right,
-                            'SMART',
-                            currency=alt)
-                        tasks.append(client.qualifyContractsAsync(c))
-
-                    # Run all qualification attempts in parallel
-                    results = await asyncio.gather(*tasks, return_exceptions=True)
-
-                    for res in results:
-                        if isinstance(res, list) and res and res[0]:
-                            qualified = res
-                            logger.info(f"Qualified option {underlying} {expiry} {strike} {right} via parallel fallback (currency={res[0].currency})")
-                            break
-
-                    if not qualified or not qualified[0]:
-                        # Dynamic Fallback: Search for the underlying symbol
-                        logger.info(f"Performing dynamic symbol search for {underlying}...")
-                        descriptions = await client.reqMatchingSymbolsAsync(underlying)
-
-                        best_match = None
-                        for d in descriptions:
-                            if d.contract.secType == 'STK' and d.contract.symbol == underlying:
-                                best_match = d.contract
-                                break
-
-                        if best_match:
-                            logger.info(f"Found match: {best_match.symbol} on {best_match.primaryExchange or best_match.exchange} ({best_match.currency})")
-                            # Try to qualify option using the specific currency from the stock
-                            c = Option(
-                                ticker,
-                                expiry,
-                                strike,
-                                right,
-                                'SMART',
-                                currency=best_match.currency)
-                            # Sometimes the exchange also needs to be explicit if SMART fails, but usually currency is enough for top liquid stocks
-                            qualified = await client.qualifyContractsAsync(c)
         except Exception as e:
             logger.warning(f"Live qualification failed: {e}")
             if snap:
@@ -739,90 +776,62 @@ async def get_option_risk(symbol: str):
         # Detect format:
         # European format: starts with "P " or "C " (right first), e.g., "P HMI  20260220 1900 M"
         # OSI Format: ends with YYMMDD + P/C + 8-digit strike, e.g., "ASTS  260109P00065000"
-        #             May have padding spaces between ticker and date
-
+        
         # Check if it's European format (starts with P or C followed by space)
-        is_european_format = len(symbol) > 2 and symbol[0] in (
-            'P', 'C') and symbol[1] == ' '
+        is_european_format = len(symbol) > 2 and symbol[0] in ('P', 'C') and symbol[1] == ' '
+
+        ticker = ""
+        expiry = ""
+        strike_val = 0.0
+        right = ""
+        currency = "USD"
 
         if is_european_format:
             # European/IBKR localSymbol format: "P HMI  20260220 1900 M"
-            # Format: RIGHT SYMBOL YYYYMMDD STRIKE MULTIPLIER
             parts = symbol.split()
-
             if len(parts) < 4:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Invalid option symbol format: {symbol}")
+                raise HTTPException(status_code=400, detail=f"Invalid option symbol format: {symbol}")
 
-            # Parse based on position
             right = parts[0]  # P or C
             raw_ticker = parts[1]  # HMI, RMS, etc.
-            expiry = parts[2]  # YYYYMMDD (already in correct format)
-            # Strike price as-is (no division needed)
+            expiry = parts[2]  # YYYYMMDD
             strike_val = float(parts[3])
-            # parts[4] is multiplier indicator (M), ignored for contract
-            # creation
-
+            
             # Parse ticker for international stocks (e.g., HMI.PA -> SBF/EUR)
-            # Note: European option tickers usually don't have suffix in localSymbol,
-            # but the underlying might have been originally specified with one
             ticker, exchange, currency = parse_symbol(raw_ticker)
 
-            # For European format options without suffix, default to EUR instead of USD
-            # since most European options trade in EUR
+            # For European format options without suffix, default to EUR if not specified
             if currency == "USD" and '.' not in raw_ticker:
                 currency = "EUR"
         else:
-            # OSI Format (US options): "ASTS  260109P00065000" or "ASTS260109P00065000"
-            # Remove any internal spaces (padding between ticker and date)
+            # OSI Format (US options): "ASTS  260109P00065000"
             symbol_clean = symbol.replace(' ', '')
-
-            # Strike: Last 8 chars (divided by 1000)
             strike_val = float(symbol_clean[-8:]) / 1000.0
-            # Right: -9 char
             right = symbol_clean[-9]
-            # Expiry: -15 to -9 (YYMMDD)
             expiry_raw = symbol_clean[-15:-9]
             expiry = f"20{expiry_raw[0:2]}{expiry_raw[2:4]}{expiry_raw[4:6]}"
-            # Ticker: everything before expiry (may contain market suffix like
-            # .L)
             raw_ticker = symbol_clean[:-15].strip()
 
-            # Parse ticker for international stocks (e.g., BATS.L -> LSE/GBP)
+            # Parse ticker for international stocks
             ticker, exchange, currency = parse_symbol(raw_ticker)
 
-        # Build contract - try to qualify it
-        contract = Option(
+        # Build contract - try to qualify it using the robust helper
+        qualified = await _qualify_option_contract(
+            client,
             ticker,
             expiry,
             strike_val,
             'P' if right == 'P' else 'C',
-            'SMART',
-            currency=currency)
-
-        # 2. Qualify Contract
-        qualified = await client.qualifyContractsAsync(contract)
-
-        # For European format, if qualification fails with current currency,
-        # try alternatives
-        if (not qualified or not qualified[0]) and is_european_format:
-            # Try with different currencies: EUR, GBP, CHF
-            for alt_currency in ['EUR', 'GBP', 'CHF', 'USD']:
-                if alt_currency == currency:
-                    continue  # Already tried this one
-                contract = Option(
-                    ticker,
-                    expiry,
-                    strike_val,
-                    'P' if right == 'P' else 'C',
-                    'SMART',
-                    currency=alt_currency)
-                qualified = await client.qualifyContractsAsync(contract)
-                if qualified and qualified[0]:
-                    logger.info(
-                        f"Found European option with currency {alt_currency}: {symbol}")
-                    break
+            currency
+        )
+        
+        if not qualified or not qualified[0]:
+             # If still not found, try varying the currency one last time if it was European format
+             # (although helper already does this, explicitly trying EUR might help if helper started with USD)
+             if is_european_format and currency == 'USD':
+                 qualified = await _qualify_option_contract(
+                    client, ticker, expiry, strike_val, 'P' if right == 'P' else 'C', 'EUR'
+                 )
 
         if not qualified or not qualified[0]:
             raise HTTPException(

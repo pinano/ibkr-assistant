@@ -55,6 +55,9 @@ class Settings(BaseSettings):
     EMAIL_SMTP_USER: str = ""
     EMAIL_SMTP_PASSWORD: str = ""
 
+    # Timezone
+    TZ: str = "UTC"
+
     model_config = SettingsConfigDict(
         env_file=".env",
         extra="ignore"

@@ -2,6 +2,10 @@ import asyncio
 import logging
 import httpx
 from datetime import datetime, timedelta
+try:
+    from zoneinfo import ZoneInfo
+except ImportError:
+    from backports.zoneinfo import ZoneInfo
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
 from aiogram.utils.keyboard import InlineKeyboardBuilder
@@ -37,6 +41,16 @@ bot = Bot(token=settings.TELEGRAM_TOKEN)
 dp = Dispatcher()
 scheduler = AsyncIOScheduler()
 monitor = Monitor(SessionLocal)
+
+
+def get_now() -> datetime:
+    """Return current time in the configured timezone."""
+    try:
+        tz = ZoneInfo(settings.TZ)
+        return datetime.now(tz)
+    except Exception:
+        return datetime.now()
+
 
 
 async def notify_admins(text: str, parse_mode: str = "Markdown"):
@@ -113,7 +127,7 @@ async def check_and_archive(force_insert: bool = False):
                 alerts = []
                 cash_changed = False
                 if last_record:
-                    for curr in ['eur', 'usd', 'gbp']:
+                    for curr in ['eur', 'usd', 'gbp', 'chf', 'sek']:
                         old_val = float(getattr(last_record, curr) or 0.0)
                         new_val = float(getattr(new_record, curr) or 0.0)
 
@@ -485,7 +499,8 @@ async def cmd_today(m: types.Message):
             # 2. Query today's min/max from DB
             session = SessionLocal()
             try:
-                today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+                now = get_now()
+                today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
 
                 # Get records for min and max today
                 min_rec = session.query(CashBalance).filter(
@@ -514,10 +529,10 @@ async def cmd_today(m: types.Message):
                 # DB today
                 if curr_val < min_val:
                     min_val = curr_val
-                    min_time = f"{datetime.now().strftime('%H:%M')} (Now)"
+                    min_time = f"{get_now().strftime('%H:%M')} (Now)"
                 if curr_val > max_val:
                     max_val = curr_val
-                    max_time = f"{datetime.now().strftime('%H:%M')} (Now)"
+                    max_time = f"{get_now().strftime('%H:%M')} (Now)"
 
                 msg = (
                     f"📅 *Daily NAV Range*\n"
@@ -541,7 +556,7 @@ async def cmd_year(m: types.Message):
         return
 
     args = m.text.split()
-    target_year = datetime.now().year
+    target_year = get_now().year
     if len(args) > 1:
         try:
             target_year = int(args[1])
@@ -588,7 +603,7 @@ async def cmd_year(m: types.Message):
                     CashBalance.nav.desc()).first()
 
                 if not first_rec and (
-                        curr_val is None or target_year != datetime.now().year):
+                        curr_val is None or target_year != get_now().year):
                     await m.answer(f"📭 No records found for year {target_year}.")
                     return
 
@@ -599,7 +614,7 @@ async def cmd_year(m: types.Message):
 
                 # Calculate End
                 is_now = False
-                if target_year == datetime.now().year and curr_val is not None:
+                if target_year == get_now().year and curr_val is not None:
                     end_nav = curr_val
                     end_date = "Now"
                     is_now = True
@@ -621,7 +636,7 @@ async def cmd_year(m: types.Message):
                 max_date = max_rec.date.strftime(
                     "%Y-%m-%d") if max_rec else "Now"
 
-                if target_year == datetime.now().year and curr_val is not None:
+                if target_year == get_now().year and curr_val is not None:
                     if curr_val < min_val:
                         min_val = curr_val
                         min_date = "Now"
@@ -782,12 +797,19 @@ async def cmd_quote(m: types.Message):
             # 16:26:52
             ts_str = data['timestamp']
             if 'T' in ts_str:
-                date_part, time_part = ts_str.split('T')
-                time_part = time_part.split('.')[0].replace('Z', '')
-                ts_formatted = f"{date_part} {time_part}"
+                # Convert Z string to timezone aware datetime if possible, otherwise just string manipulation
+                try:
+                    dt_utc = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+                    tz = ZoneInfo(settings.TZ)
+                    dt_local = dt_utc.astimezone(tz)
+                    ts_formatted = dt_local.strftime("%Y-%m-%d %H:%M:%S")
+                except Exception:
+                     date_part, time_part = ts_str.split('T')
+                     time_part = time_part.split('.')[0].replace('Z', '')
+                     ts_formatted = f"{date_part} {time_part}"
             else:
                 ts_formatted = ts_str
-
+            
             out += f"⏱ `{ts_formatted}`"
 
             await msg.edit_text(out, parse_mode="Markdown")
@@ -1155,7 +1177,7 @@ async def cmd_delta(m: types.Message):
                 qty_str = f"({r['qty']:.0f})".rjust(4)
 
                 lines.append(
-                    f"{marker} <code>{display_padded} Δ {delta_str} {qty_str}</code>"
+                    f"{marker} <code>{display_padded} Δ{delta_str} {qty_str}</code>"
                 )
 
             lines.append(f"\n🔴 abs(Δ) &gt; {settings.ALERT_DELTA_THRESHOLD}  🟢 abs(Δ) ≤ {settings.ALERT_DELTA_THRESHOLD}")
@@ -1268,6 +1290,15 @@ async def main():
         hour='9-18',
         minute='*/15',
         id='greeks_cache_refresh'
+    )
+
+    # 8. Schedule: DB Cleanup (Daily at 04:00)
+    scheduler.add_job(
+        monitor.prune_old_snapshots,
+        'cron',
+        hour=4,
+        minute=0,
+        id='db_cleanup'
     )
 
     check_cron_log = check_cron if effective_check_mins else 'None (covered by snapshots)'

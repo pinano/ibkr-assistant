@@ -15,6 +15,25 @@ class Monitor:
         # Cache for global alerts to avoid spam: {symbol: last_alert_time}
         self.global_alert_cache = {}
 
+    async def prune_old_snapshots(self, days_retention=7):
+        """Delete option snapshots older than retention period."""
+        from src.models import OptionSnapshot
+        logger.info(f"Pruning option snapshots older than {days_retention} days...")
+        session = self.SessionLocal()
+        try:
+            cutoff_date = datetime.datetime.now() - datetime.timedelta(days=days_retention)
+            # Use synchronize_session=False for performance on bulk delete
+            deleted_count = session.query(OptionSnapshot).filter(
+                OptionSnapshot.updated_at < cutoff_date
+            ).delete()
+            session.commit()
+            logger.info(f"Pruned {deleted_count} old snapshots.")
+        except Exception as e:
+            logger.error(f"Error pruning snapshots: {e}")
+            session.rollback()
+        finally:
+            session.close()
+
     async def check_alerts(self):
         from src.bot import notify_admins
         logger.info("Checking alerts...")
@@ -131,7 +150,7 @@ class Monitor:
                     qty_str = f"({a['qty']:.0f})".rjust(4)
 
                     lines.append(
-                        f"{marker} <code>{display_padded} Δ {delta_str} {qty_str}</code>"
+                        f"{marker} <code>{display_padded} Δ{delta_str} {qty_str}</code>"
                     )
                 lines.append(f"\n🔴 abs(Δ) &gt; {settings.ALERT_DELTA_THRESHOLD}")
 
