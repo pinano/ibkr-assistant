@@ -188,3 +188,46 @@ function _fetchFromIBKR(ticker, expDate, type, formattedStrike) {
         return null;
     }
 }
+
+/**
+ * GETFXRATE
+ * @author pinano (farroyo@gmail.com)
+ *
+ * Fetches the live exchange rate for a currency pair from the IBKR API.
+ * Useful as a fallback when GOOGLEFINANCE("EURUSD") fails.
+ *
+ * @param {string} pair - The currency pair (e.g., "EURUSD" or "GBPUSD").
+ * @return {number|string} The exchange rate or an error message.
+ * @customfunction
+ */
+function GETFXRATE(pair) {
+    try {
+        if (!IBKR_API_KEY) {
+            return 'Error: API key not configured.';
+        }
+
+        const cleanPair = pair.replace(/[^A-Z]/ig, "").toUpperCase();
+        if (cleanPair.length !== 6) {
+            return 'Error: Invalid pair format. Use "EURUSD".';
+        }
+
+        const url = `${IBKR_API_URL}/market/snapshot/${cleanPair}`;
+
+        const response = UrlFetchApp.fetch(url, {
+            method: 'get',
+            headers: { 'X-API-Key': IBKR_API_KEY },
+            muteHttpExceptions: true
+        });
+
+        if (response.getResponseCode() !== 200) {
+            const errorData = JSON.parse(response.getContentText());
+            return 'Error: ' + (errorData.detail || 'API request failed');
+        }
+
+        const data = JSON.parse(response.getContentText());
+        return data.price || 'Error: No price data available';
+
+    } catch (e) {
+        return 'Error: ' + e.message;
+    }
+}

@@ -659,9 +659,15 @@ async def get_market_snapshot(symbol: str):
     client = await get_ib()
     client.reqMarketDataType(4)
     
-    # Parse symbol for international stocks (e.g., BATS.L -> LSE/GBP)
-    ticker, exchange, currency = parse_symbol(symbol)
-    contract = Contract(symbol=ticker, secType="STK", exchange=exchange, currency=currency)
+    # Parse symbol: Detect 6-char FX pairs (e.g., EURUSD)
+    if len(symbol) == 6 and symbol.isalpha():
+        # Treat as CASH pair on IDEALPRO
+        contract = Contract(symbol=symbol[:3], secType="CASH", exchange="IDEALPRO", currency=symbol[3:])
+        logger.info(f"Detected FX pair {symbol}, using CASH contract: {contract.symbol}.{contract.currency}")
+    else:
+        # Parse symbol for international stocks (e.g., BATS.L -> LSE/GBP)
+        ticker, exchange, currency = parse_symbol(symbol)
+        contract = Contract(symbol=ticker, secType="STK", exchange=exchange, currency=currency)
 
     
     qualified = await client.qualifyContractsAsync(contract)

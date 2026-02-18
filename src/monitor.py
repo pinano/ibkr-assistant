@@ -170,7 +170,7 @@ class Monitor:
                     qty_str = f"({a['qty']:.0f})".rjust(4)
                     
                     lines.append(
-                        f"{marker} <code>{display_padded}  Δ {delta_str}  {qty_str}</code>"
+                        f"{marker} <code>{display_padded} Δ {delta_str} {qty_str}</code>"
                     )
                 lines.append(f"\n🔴 abs(Δ) &gt; {self.GLOBAL_DELTA_THRESHOLD}")
                 
