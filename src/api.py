@@ -483,30 +483,32 @@ async def get_option_greeks(
                 logger.warning(f"Cached data for conId={conId} has invalid Greeks, forcing live fetch")
 
         # 3. If we get here, we want live data (or cache was stale)
+        # 2b. Check CBOE (for US options largely)
+        # We try this BEFORE connecting to IBKR if we don't have a valid cache,
+        # or if we are forcing refresh (but CBOE is faster so maybe we prefer CBOE even on force refresh?
+        # User said "prioritize CBOE". So if force_refresh is True, we might still want CBOE if it's up to date.
+        # But usually force_refresh implies re-fetching key data. CBOE updates often.
+        # let's try CBOE even if force_refresh is False (standard path).
+        
+        # Simple heuristic: if it looks like a US ticker (no suffix), try CBOE
+        # or if we explicitly know it's US.
+        is_likely_us = '.' not in underlying or underlying in ['SPX', 'VIX', 'NDX', 'RUT']
+        
+        if is_likely_us and not force_refresh:
+            try:
+                cboe_data = await _fetch_cboe_greeks(underlying, expiry, strike, right)
+                if cboe_data:
+                    logger.info(f"Fetched Greeks from CBOE for {underlying} {expiry} {strike} {right}")
+                    return cboe_data
+            except Exception as e:
+                logger.debug(f"CBOE check failed: {e}")
+
+        # 3. If we get here, we want live data (or cache was stale)
         qualified = None
         try:
             client = await get_ib()
             client.reqMarketDataType(4)
-                logger.warning(f"Cached data for conId={conId} has invalid Greeks, forcing live fetch")
 
-        # 2b. Check CBOE (for US options largely)
-        # We try this BEFORE connecting to IBKR if we don't have a valid cache.
-        # This is a "best effort" attempt.
-        if not force_refresh:
-            # Simple heuristic: if it looks like a US ticker (no suffix), try CBOE
-            # or if we explicitly know it's US.
-            is_likely_us = '.' not in underlying or underlying in ['SPX', 'VIX', 'NDX', 'RUT']
-            
-            if is_likely_us:
-                try:
-                    cboe_data = await _fetch_cboe_greeks(underlying, expiry, strike, right)
-                    if cboe_data:
-                        logger.info(f"Fetched Greeks from CBOE for {underlying} {expiry} {strike} {right}")
-                        return cboe_data
-                except Exception as e:
-                    logger.debug(f"CBOE check failed: {e}")
-
-        # 3. If we get here, we want live data (or cache was stale)
             if conId:
                 contract = Option(conId=conId)
                 qualified = await client.qualifyContractsAsync(contract)
