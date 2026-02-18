@@ -1160,7 +1160,7 @@ async def cmd_delta(m: types.Message):
                 delta_str = f"{r['delta']:+.3f}".rjust(7)
                 qty_str = f"({r['qty']:.0f})".rjust(4)
                 lines.append(
-                    f"{marker} <code>{display_padded}  Δ {delta_str}  {qty_str}</code>"
+                    f"{marker} <code>{display_padded} Δ {delta_str} {qty_str}</code>"
                 )
             
             lines.append(f"\n🔴 abs(Δ) &gt; {monitor.GLOBAL_DELTA_THRESHOLD}  🟢 abs(Δ) ≤ {monitor.GLOBAL_DELTA_THRESHOLD}")

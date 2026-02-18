@@ -265,15 +265,21 @@ async def get_option_greeks(underlying: str, expiry: str, strike: float, right: 
             contract = Option(ticker, expiry, strike, right, 'SMART', currency=currency)
             qualified = await client.qualifyContractsAsync(contract)
         
-            # If qualification fails, try alternative currencies
+            # Fallback: try symbol-based qualification via parallel execution for other currencies
             if not qualified or not qualified[0]:
-                for alt_currency in ['USD', 'EUR', 'GBP', 'CHF']:
-                    if alt_currency == currency:
-                        continue
-                    contract = Option(ticker, expiry, strike, right, 'SMART', currency=alt_currency)
-                    qualified = await client.qualifyContractsAsync(contract)
-                    if qualified and qualified[0]:
-                        logger.info(f"Qualified option {underlying} {expiry} {strike} {right} with currency {alt_currency}")
+                alt_currencies = [c for c in ['USD', 'EUR', 'GBP', 'CHF'] if c != currency]
+                tasks = []
+                for alt in alt_currencies:
+                    c = Option(ticker, expiry, strike, right, 'SMART', currency=alt)
+                    tasks.append(client.qualifyContractsAsync(c))
+                
+                # Run all qualification attempts in parallel
+                results = await asyncio.gather(*tasks, return_exceptions=True)
+                
+                for res in results:
+                    if isinstance(res, list) and res and res[0]:
+                        qualified = res
+                        logger.info(f"Qualified option {underlying} {expiry} {strike} {right} via parallel fallback (currency={res[0].currency})")
                         break
         
         if not qualified or not qualified[0]:
