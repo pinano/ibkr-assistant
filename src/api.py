@@ -39,6 +39,10 @@ if not db_url:
 engine = create_engine(db_url, pool_pre_ping=True)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
+# Auto-create tables if they don't exist
+from src.models import Base
+Base.metadata.create_all(bind=engine)
+
 
 def get_db():
     db = SessionLocal()

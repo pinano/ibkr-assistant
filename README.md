@@ -60,7 +60,6 @@ Configuration is managed in `.env` (generated from `.env.dist`). Key variables:
 | `CASH_DIFFERENCE_CHECK_INTERVAL` | `300` | Seconds between cash balance change checks |
 | `DB_INSERT_INTERVAL` | `1800` | Seconds between periodic DB snapshots |
 | `TELEGRAM_ALLOWED_IDS` | — | Comma-separated authorized Telegram user IDs |
-| `DOMAIN` / `CERT_RESOLVER` | — | If running behind a Traefik proxy |
 
 ## 🕹 Operation
 
