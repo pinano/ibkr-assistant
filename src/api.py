@@ -16,8 +16,25 @@ from src.models import AccountSummary, PositionItem, CurrencyItem, OptionGreeks,
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("ibkr-api")
 
-# Database Setup
-engine = create_engine(settings.DB_URL, pool_pre_ping=True)
+import os
+
+# Database Setup - Robust resolution for Docker environments
+db_url = os.environ.get("DB_URL") or settings.DB_URL
+
+if not db_url:
+    # If DB_URL is still empty, reconstruct it from individual components
+    db_user = os.environ.get("DB_USER")
+    db_pass = os.environ.get("DB_PASSWORD")
+    db_name = os.environ.get("DB_NAME", "ibkr")
+    if db_user and db_pass:
+        db_url = f"mysql+pymysql://{db_user}:{db_pass}@{settings.PROJECT_ID}-db/{db_name}"
+        logger.info("Constructed DB_URL from individual components")
+
+if not db_url:
+    logger.error("DB_URL is not set and could not be reconstructed.")
+    # We'll let create_engine fail with a clear error if it proceeds
+
+engine = create_engine(db_url, pool_pre_ping=True)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 def get_db():

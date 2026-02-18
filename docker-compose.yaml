@@ -58,9 +58,13 @@ services:
     environment:
       - TZ=${TZ}
       - PROJECT_ID=${PROJECT_ID}
+      - DB_USER=${DB_USER}
+      - DB_PASSWORD=${DB_PASSWORD}
+      - DB_NAME=${DB_NAME}
       - IB_PORT=${IB_PORT}
       - IB_CLIENT_ID=${IB_CLIENT_ID}
       - API_KEY=${API_KEY}
+      - DB_URL=mysql+pymysql://${DB_USER}:${DB_PASSWORD}@${PROJECT_ID}-db/${DB_NAME}
     depends_on:
       ibkr-db:
         condition: service_healthy
