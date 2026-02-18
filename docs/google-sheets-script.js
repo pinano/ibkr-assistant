@@ -2,8 +2,8 @@
 const _CBOE_CACHE = {};
 
 // --- IBKR API Configuration ---
-const IBKR_API_URL = 'https://ib1.pinano.org';
-const IBKR_API_KEY = '6c75b860e9736d08018f70f1c2b2d2ceb23f99b64f9b025c4c764b541d457e0f'; // <-- Set your API_KEY here
+const IBKR_API_URL = 'API_URL';
+const IBKR_API_KEY = 'API_KEY'; // <-- Set your API_KEY here
 
 /**
  * GETOPTIONDATA
