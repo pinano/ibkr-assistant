@@ -235,27 +235,60 @@ class Monitor:
 
                     async def refresh_one(opt):
                         async with semaphore:
-                            try:
-                                params = {
-                                    'underlying': opt.get('underlying', ''),
-                                    'expiry': opt.get('expiry', ''),
-                                    'strike': opt.get('strike', 0),
-                                    'right': opt.get('right', ''),
-                                    'conId': opt.get('conId', 0),
-                                    'force_refresh': 'true'
-                                }
-                                # Verify essential params are present
-                                if not params['underlying'] or not params['expiry']:
-                                    return
+                            symbol_name = opt.get('underlying', 'unknown')
+                            max_retries = 3
+                            for attempt in range(max_retries):
+                                try:
+                                    params = {
+                                        'underlying': opt.get('underlying', ''),
+                                        'expiry': opt.get('expiry', ''),
+                                        'strike': opt.get('strike', 0),
+                                        'right': opt.get('right', ''),
+                                        'conId': opt.get('conId', 0),
+                                        'force_refresh': 'true'
+                                    }
+                                    if not params['underlying'] or not params['expiry']:
+                                        return False
 
-                                await client.get(f"{settings.WEB_SERVICE_URL}/option/greeks", params=params, headers=headers)
-                            except Exception as e:
-                                logger.error(f"Error refreshing {opt.get('underlying')}: {e}")
+                                    resp = await client.get(
+                                        f"{settings.WEB_SERVICE_URL}/option/greeks",
+                                        params=params, headers=headers
+                                    )
+                                    if resp.status_code == 200:
+                                        data = resp.json()
+                                        # Check if returned data has valid Greeks
+                                        d = data.get('delta', 0)
+                                        g = data.get('gamma', 0)
+                                        th = data.get('theta', 0)
+                                        v = data.get('vega', 0)
+                                        u = data.get('underlying_price', 0)
+                                        if (d == 0 and g == 0 and th == 0 and v == 0) or u == 0:
+                                            if attempt < max_retries - 1:
+                                                logger.debug(f"Retry {attempt + 1}/{max_retries} for {symbol_name}: Greeks invalid")
+                                                await asyncio.sleep(3)
+                                                continue
+                                            logger.warning(f"Failed to get valid Greeks for {symbol_name} after {max_retries} attempts")
+                                            return False
+                                        return True
+                                    else:
+                                        if attempt < max_retries - 1:
+                                            await asyncio.sleep(2)
+                                            continue
+                                        return False
+                                except Exception as e:
+                                    logger.error(f"Error refreshing {symbol_name}: {e}")
+                                    if attempt < max_retries - 1:
+                                        await asyncio.sleep(2)
+                                        continue
+                                    return False
+                            return False
 
                     tasks = [refresh_one(opt) for opt in options]
-                    await asyncio.gather(*tasks)
+                    results = await asyncio.gather(*tasks)
+                    success = sum(1 for r in results if r)
+                    failed = len(results) - success
 
-                    logger.info("Greeks cache refresh complete.")
+                    logger.info(f"Greeks cache refresh complete: {success}/{len(options)} valid, {failed} failed")
 
                 except Exception as e:
                     logger.error(f"Error checking positions/refreshing: {e}")

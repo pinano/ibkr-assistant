@@ -160,3 +160,13 @@ class OptionSnapshot(Base):
     vega = Column(Float)
     implied_vol = Column(Float)
     underlying_price = Column(Float)
+
+
+class MarketCache(Base):
+    __tablename__ = 'market_cache'
+
+    symbol = Column(String(20), primary_key=True)  # e.g. "EURUSD", "AAPL"
+    price = Column(Float)
+    bid = Column(Float)
+    ask = Column(Float)
+    updated_at = Column(DateTime, default=datetime.now)

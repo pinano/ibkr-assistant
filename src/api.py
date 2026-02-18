@@ -12,7 +12,7 @@ from ib_async import IB, Option, Contract, ExecutionFilter
 from src.config import settings
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, Session
-from src.models import AccountSummary, PositionItem, CurrencyItem, OptionGreeks, OrderItem, TradeItem, ContractDetailsItem, MarketSnapshot, OptionChainItem, OptionSnapshot
+from src.models import AccountSummary, PositionItem, CurrencyItem, OptionGreeks, OrderItem, TradeItem, ContractDetailsItem, MarketSnapshot, OptionChainItem, OptionSnapshot, MarketCache
 
 # Logging Setup
 logging.basicConfig(level=logging.INFO)
@@ -102,6 +102,46 @@ def parse_symbol(symbol: str) -> tuple:
 
     # Default: US stock
     return (symbol, "SMART", "USD")
+
+
+def _greeks_are_valid(g, und_price_override=None):
+    """Return True if the Greeks data is meaningful enough to cache.
+
+    Requires at least one non-zero Greek AND a non-zero underlying price.
+    """
+    if not g:
+        return False
+
+    def _safe(val):
+        return val if (val is not None and not math.isnan(val)) else 0.0
+
+    delta = _safe(g.delta)
+    gamma = _safe(g.gamma)
+    theta = _safe(g.theta)
+    vega = _safe(g.vega)
+    und = _safe(und_price_override if und_price_override is not None else g.undPrice)
+
+    if delta == 0 and gamma == 0 and theta == 0 and vega == 0:
+        return False
+    if und == 0:
+        return False
+    return True
+
+
+def _snap_is_valid(snap):
+    """Return True if a cached OptionSnapshot has meaningful Greeks."""
+    if not snap:
+        return False
+    d = snap.delta or 0.0
+    g = snap.gamma or 0.0
+    t = snap.theta or 0.0
+    v = snap.vega or 0.0
+    u = snap.underlying_price or 0.0
+    if d == 0 and g == 0 and t == 0 and v == 0:
+        return False
+    if u == 0:
+        return False
+    return True
 
 
 async def get_ib():
@@ -336,9 +376,9 @@ async def get_option_greeks(
                 snap = db.query(OptionSnapshot).filter(
                     OptionSnapshot.conId == conId).first()
 
-            # If we have a fresh cache (< 60 mins), return it immediately
+            # If we have a fresh cache (< 60 mins) with valid data, return it
             if not force_refresh and snap and snap.updated_at > datetime.now() - \
-                    timedelta(minutes=60):
+                    timedelta(minutes=60) and _snap_is_valid(snap):
                 logger.info(f"Serving fresh cached greeks for conId={conId}")
                 return OptionGreeks(
                     symbol=snap.symbol,
@@ -352,6 +392,9 @@ async def get_option_greeks(
                     volume=0,
                     open_interest=0
                 )
+            elif not force_refresh and snap and snap.updated_at > datetime.now() - \
+                    timedelta(minutes=60) and not _snap_is_valid(snap):
+                logger.warning(f"Cached data for conId={conId} has invalid Greeks, forcing live fetch")
 
         # 3. If we get here, we want live data (or cache was stale)
         qualified = None
@@ -443,16 +486,20 @@ async def get_option_greeks(
                 status_code=404,
                 detail=f"Option contract not found: {underlying} {expiry} {strike} {right}")
 
-        # Request market data and wait for Greeks
+        # Request market data and wait for valid Greeks
         client.reqMktData(qualified[0], '', False, False)
 
         t = None
-        for _ in range(50):  # Wait up to 5 seconds
+        g = None
+        for _ in range(80):  # Wait up to 8 seconds for valid Greeks
             await asyncio.sleep(0.1)
             t = client.ticker(qualified[0])
             if t:
                 g = t.modelGreeks or t.bidGreeks or t.askGreeks or t.lastGreeks
-                if g or (t.last is not None and not math.isnan(t.last)):
+                if _greeks_are_valid(g):
+                    break
+                # Accept last price only after 5s if no Greeks arrive
+                if _ >= 50 and (t.last is not None and not math.isnan(t.last)):
                     break
 
         client.cancelMktData(qualified[0])
@@ -491,8 +538,8 @@ async def get_option_greeks(
 
         display_symbol = f"{underlying} {expiry} {strike} {right}"
 
-        # Update Cache
-        if qualified and qualified[0]:
+        # Update Cache — only if Greeks are valid
+        if qualified and qualified[0] and _greeks_are_valid(g):
             cid = qualified[0].conId
             snap = db.query(OptionSnapshot).filter(
                 OptionSnapshot.conId == cid).first()
@@ -511,6 +558,9 @@ async def get_option_greeks(
             snap.last_price = safe_float(t_last)
 
             db.commit()
+            logger.info(f"Cached valid Greeks for {display_symbol} (conId={cid})")
+        elif qualified and qualified[0]:
+            logger.warning(f"Skipping DB cache for {display_symbol}: Greeks data invalid (all zeros or missing underlying price)")
 
         return OptionGreeks(
             symbol=display_symbol,
@@ -829,7 +879,27 @@ async def search_contract(symbol: str, secType: str = "STK"):
 
 @app.get("/market/snapshot/{symbol}", response_model=MarketSnapshot,
          dependencies=[Depends(verify_key)])
-async def get_market_snapshot(symbol: str):
+async def get_market_snapshot(symbol: str, db: Session = Depends(get_db)):
+    """
+    Fetch market snapshot for a symbol (Stock or FX).
+    Prioritizes DB cache (valid for 60 mins) before hitting IBKR live.
+    """
+    symbol = symbol.strip().upper()
+    from datetime import timedelta
+
+    # 1. Check Cache first
+    cache = db.query(MarketCache).filter(MarketCache.symbol == symbol).first()
+    if cache and cache.updated_at > datetime.now() - timedelta(minutes=60):
+        logger.info(f"Serving cached snapshot for {symbol}")
+        return MarketSnapshot(
+            symbol=symbol,
+            price=cache.price,
+            bid=cache.bid,
+            ask=cache.ask,
+            timestamp=cache.updated_at
+        )
+
+    # 2. If not in cache or stale, query live
     client = await get_ib()
     client.reqMarketDataType(4)
 
@@ -852,37 +922,53 @@ async def get_market_snapshot(symbol: str):
 
     qualified = await client.qualifyContractsAsync(contract)
     if not qualified:
+        # If live fail but we have STALE cache, return it
+        if cache:
+            logger.warning(f"Live snapshot failed for {symbol}, serving STALE cache")
+            return MarketSnapshot(
+                symbol=symbol,
+                price=cache.price,
+                bid=cache.bid,
+                ask=cache.ask,
+                timestamp=cache.updated_at
+            )
         raise HTTPException(status_code=404, detail="Contract not found")
 
     contract = qualified[0]
 
-    # Use reqTickersAsync. Note: ib_async expects contracts as positional
-    # arguments (*args)
     logger.info(f"Requesting ticker for contract: {contract}")
     try:
         tickers = await client.reqTickersAsync(contract)
         if not tickers:
+            if cache:
+                logger.warning(f"No live data for {symbol}, serving STALE cache")
+                return MarketSnapshot(
+                    symbol=symbol,
+                    price=cache.price,
+                    bid=cache.bid,
+                    ask=cache.ask,
+                    timestamp=cache.updated_at
+                )
             raise HTTPException(status_code=504,
                                 detail="No market data received from IBKR")
         t = tickers[0]
     except Exception as e:
         logger.error(f"Error in reqTickersAsync: {e}", exc_info=True)
+        if cache:
+            logger.warning(f"IBKR Error for {symbol}, serving STALE cache")
+            return MarketSnapshot(
+                symbol=symbol,
+                price=cache.price,
+                bid=cache.bid,
+                ask=cache.ask,
+                timestamp=cache.updated_at
+            )
         raise HTTPException(status_code=503, detail=f"IBKR Error: {str(e)}")
 
-    # Robust price extraction
-    # 1. Try marketPrice() (Last or Close)
-    # 2. Try last
-    # 3. Try bid/ask midpoint
-    # 4. Try close
-
-    v_last = t.last if (
-        t.last is not None and not math.isnan(
-            t.last)) else None
+    v_last = t.last if (t.last is not None and not math.isnan(t.last)) else None
     v_bid = t.bid if (t.bid is not None and not math.isnan(t.bid)) else None
     v_ask = t.ask if (t.ask is not None and not math.isnan(t.ask)) else None
-    v_close = t.close if (
-        t.close is not None and not math.isnan(
-            t.close)) else None
+    v_close = t.close if (t.close is not None and not math.isnan(t.close)) else None
 
     price = v_last
     if price is None:
@@ -893,15 +979,25 @@ async def get_market_snapshot(symbol: str):
         else:
             price = v_bid or v_ask or 0.0
 
-    logger.info(
-        f"Snapshot for {symbol}: last={v_last}, bid={v_bid}, ask={v_ask}, close={v_close} -> price={price}")
+    logger.info(f"Snapshot for {symbol}: price={price} (live)")
+
+    # 3. Update Cache
+    if not cache:
+        cache = MarketCache(symbol=symbol)
+        db.add(cache)
+    
+    cache.price = price
+    cache.bid = v_bid
+    cache.ask = v_ask
+    cache.updated_at = datetime.now()
+    db.commit()
 
     return MarketSnapshot(
-        symbol=contract.localSymbol,
+        symbol=symbol,
         price=price,
         bid=v_bid,
         ask=v_ask,
-        timestamp=t.time or datetime.now()
+        timestamp=cache.updated_at
     )
 
 
