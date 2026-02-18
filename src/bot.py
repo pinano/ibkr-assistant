@@ -1143,6 +1143,10 @@ async def cmd_delta(m: types.Message):
             # Sort by absolute delta descending
             results.sort(key=lambda x: abs(x['delta']), reverse=True)
             
+            # Calculate max display width for alignment
+            max_display = max(len(r['display']) for r in results)
+            pad = max(max_display, 18)  # minimum 18 chars
+            
             # Build digest message
             high_count = sum(1 for r in results if r['high'])
             header = f"📊 <b>Delta Report — {len(results)} Short Position(s)</b>\n"
@@ -1152,11 +1156,14 @@ async def cmd_delta(m: types.Message):
             lines = [header]
             for r in results:
                 marker = "🔴" if r['high'] else "🟢"
+                display_padded = r['display'].ljust(pad)
+                delta_str = f"{r['delta']:+.3f}".rjust(7)
+                qty_str = f"({r['qty']:.0f})".rjust(4)
                 lines.append(
-                    f"{marker} <code>{r['display']}</code>  "
-                    f"Δ <code>{r['delta']:.3f}</code>  "
-                    f"Qty <code>{r['qty']:.0f}</code>"
+                    f"{marker} <code>{display_padded}  Δ {delta_str}  {qty_str}</code>"
                 )
+            
+            lines.append(f"\n🔴 abs(Δ) &gt; {monitor.GLOBAL_DELTA_THRESHOLD}  🟢 abs(Δ) ≤ {monitor.GLOBAL_DELTA_THRESHOLD}")
             
             await m.answer("\n".join(lines), parse_mode="HTML")
     

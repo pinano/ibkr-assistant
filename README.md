@@ -4,18 +4,21 @@ A robust monitoring and management stack for Interactive Brokers (IBKR). This pr
 
 ## 🚀 Key Features
 
-*   **IBKR REST API**: A FastAPI wrapper utilizing `ib_async` to provide endpoints for account summaries, positions, and option Greeks.
+*   **IBKR REST API**: A FastAPI wrapper utilizing `ib_async` to provide endpoints for account summaries, positions, orders, trades, and option Greeks.
 *   **Persistent Storage**: MariaDB database to store historical account balances and portfolio performance.
 *   **Telegram Bot**:
     *   **Multi-User Security**: Configurable allow-list (`TELEGRAM_ALLOWED_IDS`) to support multiple admins.
-    *   **Real-time Alerts**: Automatically notifies about significant balance changes in EUR, USD, and GBP/CHF/SEK.
-    *   **Interactive Commands**: Check NAV, positions, options, and historical highs.
+    *   **Real-time Alerts**: Automatically notifies about significant balance changes in EUR, USD, and GBP.
+    *   **Delta Monitoring**: Scheduled checks for high-delta short option positions, with consolidated digest notifications and per-contract throttling (4h cooldown).
+    *   **Custom Alerts**: User-defined alerts on option Greeks, price, and IV via `/alert`.
+    *   **Interactive Commands**: Check NAV, positions, options Greeks, and historical highs.
     *   **Flex Query Management**: Scheduled and on-demand generation of official IBKR reports.
 *   **Flex Query Data Architecture**:
     *   **Automated Scheduling**: Configurable cron-based schedule (default 07:30 Tue-Sat).
     *   **Robust Archiving**: All XML reports are downloaded and archived to `./flex_queries`.
     *   **Local Reprocessing**: Ability to re-parse and re-report on any archived XML file via the bot.
     *   **Email Reports**: Automated HTML email delivery of the reports.
+*   **Google Sheets Integration**: Custom function (`GETOPTIONDATA`) to fetch option Greeks from CBOE (US) or IBKR API (European) directly into spreadsheets. See `docs/google-sheets-script.js`.
 
 ## 🏗 Architecture
 
@@ -42,19 +45,22 @@ make init
 You will be prompted to enter:
 - **Telegram Token**: Your bot token.
 - **Allowed Telegram IDs**: Comma-separated list of user IDs allowed to interact with the bot.
-- **IBKR Credentials**: User/Pass (set these in the generated `.env` if using a real gateway, though often managed via the image env vars).
+- **IBKR Credentials**: User/Pass for the Gateway.
 - **Flex Query Token & Query ID**: For downloading reports.
 
 ### 3. Key Environment Variables
-Configuration is managed in `.env` (generated from `.env.dist`). Key variables to note:
+Configuration is managed in `.env` (generated from `.env.dist`). Key variables:
 
-*   `IB_FLEX_SCHEDULE_TIME`: Time to run the daily Flex Query (e.g., `07:30`).
-*   `IB_FLEX_DAILY_QUERY_ID`: Your daily Flex Query ID.
-*   `IB_FLEX_MONTHLY_QUERY_ID`: Your monthly Flex Query ID (runs on the 1st of each month at 12:00).
-*   `CASH_DIFFERENCE_CHECK_INTERVAL`: Frequency (in seconds) to check for cash balance changes and send alerts. Default: `300` (5 minutes). Database records are only inserted when changes are detected.
-*   `DB_INSERT_INTERVAL`: Frequency (in seconds) for periodic database snapshots. Default: `1800` (30 minutes). This ensures historical data is captured even without cash changes.
-*   `TELEGRAM_ALLOWED_IDS`: Authorization list for bot commands.
-*   `DOMAIN` / `CERT_RESOLVER`: If running behind a Traefik proxy.
+| Variable | Default | Description |
+| :--- | :--- | :--- |
+| `PROJECT_ID` | `ib` | Unique prefix for container names |
+| `IB_FLEX_SCHEDULE_TIME` | `07:30` | Time to run the daily Flex Query |
+| `IB_FLEX_DAILY_QUERY_ID` | — | Your daily Flex Query ID |
+| `IB_FLEX_MONTHLY_QUERY_ID` | — | Monthly Flex Query ID (runs 1st of each month at 12:00) |
+| `CASH_DIFFERENCE_CHECK_INTERVAL` | `300` | Seconds between cash balance change checks |
+| `DB_INSERT_INTERVAL` | `1800` | Seconds between periodic DB snapshots |
+| `TELEGRAM_ALLOWED_IDS` | — | Comma-separated authorized Telegram user IDs |
+| `DOMAIN` / `CERT_RESOLVER` | — | If running behind a Traefik proxy |
 
 ## 🕹 Operation
 
@@ -74,37 +80,40 @@ The project uses a `Makefile` for lifecycle management:
 
 | Command | Description |
 | :--- | :--- |
-| `/nav` | **Net Asset Value**: Shows current Net Liquidity, P&L, Cushion, and Margin usage. |
-| `/pos` | **Positions**: Real-time table of all open positions (Stock & Options). |
-| `/orders` | **Orders**: Show active open orders. |
-| `/trades` | **Trades**: Show executions from the current session. |
-| `/quote <SMBL>` | **Quote**: Get real-time price snapshot for any symbol. |
-| `/contract <SMBL>` | **Contract**: Search for contract details (ConID, Exchange). |
-| `/options` | **Options Dashboard**: Interactive list of option positions grouped by expiry. Click details to see **Greeks** (Δ, Θ, etc.). |
-| `/max` | **All-Time High**: Compares current NAV against the historical maximum recorded in the DB. |
-| `/today` | **Daily Range**: Show today's Min, Max, and Current NAV. |
-| `/year [YYYY]` | **Yearly Range**: Show Min, Max, and Max Diff for the specified year (default: current). |
-| `/flex` | **Daily Flex Report**: Manually trigger the daily Flex Query report immediately. |
-| `/flex monthly` | **Monthly Flex Report**: Manually trigger the monthly Flex Query report. |
-| `/flex YYYYMMDD` | **Local Flex Report**: Reprocess a previously archived XML file (e.g., `/flex 20251225`). |
-| `/help` | Show the list of available commands. |
-
-*Note: The `/risk` command has been deprecated and removed in favor of the interactive `/options` dashboard which provides more accurate, on-demand Greek calculations.*
+| `/nav` | Net Asset Value: NAV, P&L, Cushion, and Margin usage |
+| `/pos` | Real-time table of all open positions (Stocks & Options) |
+| `/orders` | Active open orders |
+| `/trades` | Executions from the current session |
+| `/quote <SMBL>` | Real-time price snapshot for any symbol |
+| `/contract <SMBL>` | Search contract details (ConID, Exchange, ISIN) |
+| `/chain <SMBL>` | Option chain expirations and strikes |
+| `/options` | Interactive options dashboard — click to see Greeks (Δ, γ, θ, ν) |
+| `/max` | All-Time High NAV vs current drawdown |
+| `/today` | Today's NAV Min / Max / Current |
+| `/year [YYYY]` | Yearly NAV analysis (Min, Max, Var%) |
+| `/delta` | On-demand delta check for all short option positions |
+| `/alert` | Manage custom alerts (`add`, `list`, `del`) |
+| `/flex` | Manually trigger daily Flex Query report |
+| `/flex monthly` | Manually trigger monthly Flex Query report |
+| `/flex YYYYMMDD` | Reprocess a previously archived XML file |
+| `/help` | Show available commands |
 
 ### 🔌 REST API Endpoints
 The `ibkr-api` service exposes the following endpoints (protected by `X-API-Key`):
 
 | Method | Endpoint | Description |
 | :--- | :--- | :--- |
-| `GET` | `/account/summary` | Returns comprehensive account metrics (NAV, Cushion, P&L, etc.). |
-| `GET` | `/account/positions` | Returns a list of all open positions. |
-| `GET` | `/account/currencies` | Returns cash balances for all held currencies. |
-| `GET` | `/option/risk/{symbol}` | Calculates real-time Greeks and market data for a specific option symbol (OSI format). |
-| `GET` | `/account/orders` | (NEW) Returns active open orders. |
-| `GET` | `/account/trades` | (NEW) Returns executions (trades) from the current session. |
-| `GET` | `/contract/search` | (NEW) Search for contract details by symbol (query param: `symbol`, optional `secType`). |
-| `GET` | `/market/snapshot/{symbol}` | (NEW) Get a real-time price snapshot for any symbol. |
-| `GET` | `/options/chain/{symbol}` | (NEW) Get option expirations and strikes for a symbol. |
+| `GET` | `/health` | Liveness probe (no auth required) |
+| `GET` | `/account/summary` | Account metrics (NAV, Cushion, P&L, cash balances) |
+| `GET` | `/account/positions` | All open positions (stocks and options) |
+| `GET` | `/account/currencies` | Cash balances for all held currencies |
+| `GET` | `/account/orders` | Active open orders |
+| `GET` | `/account/trades` | Executions from the current session |
+| `GET` | `/option/greeks` | Greeks for an option (params: `underlying`, `expiry`, `strike`, `right`, `conId`) |
+| `GET` | `/option/risk/{symbol}` | Greeks by OSI or IBKR localSymbol format |
+| `GET` | `/contract/search` | Search contract details (params: `symbol`, `secType`) |
+| `GET` | `/market/snapshot/{symbol}` | Real-time price snapshot |
+| `GET` | `/options/chain/{symbol}` | Option expirations and strikes |
 
 ## 🌍 International Stocks
 
@@ -128,24 +137,24 @@ Use suffix notation to query non-US stocks:
 
 ## 📋 Running Multiple Instances
 
-You can run multiple independent instances of this stack on the same machine (e.g., for different IBKR accounts or domains). 
+You can run multiple independent instances on the same machine (e.g., for different IBKR accounts):
 
-1.  **Clone or Copy the project** into a new directory (e.g., `ibkr-instance-2`).
-2.  **Run `make init`**.
-3.  **Set a unique `PROJECT_ID`** (e.g., `ibkr-personal`, `ibkr-trading`).
-4.  **Set a unique `MARIADB_HOST_PORT`** (e.g., `3307`, `3308`) to avoid port conflicts.
-5.  **Configure unique credentials and domain**.
-6.  **Start with `make start`**.
+1.  Clone or copy the project into a new directory.
+2.  Run `make init`.
+3.  Set a unique `PROJECT_ID` (e.g., `ib2`).
+4.  Set a unique `MARIADB_HOST_PORT` (e.g., `3307`) to avoid port conflicts.
+5.  Configure unique credentials and domain.
+6.  Start with `make start`.
 
 Each instance will have its own isolated database, containers, and Traefik routing rules.
 
 ## 📂 Data & Archiving
 
 *   **Database**: Data is stored in `./mariadb_data` (mapped volume).
-*   **Flex Queries**: XML reports are archived in `./flex_queries`. This allows for auditing and re-running reports without hitting IBKR limits.
+*   **Flex Queries**: XML reports are archived in `./flex_queries`.
 
 ## ⚠️ Important Notes
-*   **Market Data**: For Option Greeks to work in `/options`, you must have the appropriate market data subscriptions in IBKR.
+*   **Market Data**: Option Greeks require appropriate IBKR market data subscriptions.
 *   **Gateway Login**: The `ibkr-gateway` container may require 2FA authentication on first launch or periodically. Check container logs if it fails to connect.
 
 ## 📄 License
