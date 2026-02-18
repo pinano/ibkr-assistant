@@ -11,7 +11,6 @@ A robust monitoring and management stack for Interactive Brokers (IBKR). This pr
     *   **Real-time Alerts**: Automatically notifies about significant balance changes in EUR, USD, GBP, CHF, and SEK.
     *   **Timezone Awareness**: All bot commands respect the user's local timezone (via `TZ` env var).
     *   **Delta Monitoring**: Scheduled checks for high-delta short option positions, with consolidated digest notifications and per-contract throttling (4h cooldown).
-    *   **Custom Alerts**: User-defined alerts on option Greeks, price, and IV via `/alert`.
     *   **Interactive Commands**: Check NAV, positions, options Greeks, and historical highs.
     *   **Flex Query Management**: Scheduled and on-demand generation of official IBKR reports.
 *   **Flex Query Data Architecture**:
@@ -90,12 +89,11 @@ The project uses a `Makefile` for lifecycle management:
 | `/contract <SMBL>` | Search contract details (ConID, Exchange, ISIN) |
 | `/chain <SMBL>` | Option chain expirations and strikes |
 | `/options` | Interactive options dashboard — click to see Greeks (Δ, γ, θ, ν) |
-| `/option/risk` | Unified dynamic ticker lookup (supports US & International options) with consistent sign handling. |
+
 | `/max` | All-Time High NAV vs current drawdown |
 | `/today` | Today's NAV Min / Max / Current |
 | `/year [YYYY]` | Yearly NAV analysis (Min, Max, Var%) |
-| `/delta` | On-demand delta check for all short option positions |
-| `/alert` | Manage custom alerts (`add`, `list`, `del`) |
+| `/delta` | On-demand delta check for short option positions (Calls+, Puts-) |
 | `/flex` | Manually trigger daily Flex Query report |
 | `/flex monthly` | Manually trigger monthly Flex Query report |
 | `/flex YYYYMMDD` | Reprocess a previously archived XML file |
