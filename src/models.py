@@ -141,4 +141,21 @@ class Alert(Base):
     triggered = Column(Integer, default=0) # 0=Active, 1=Triggered (one-shot), 2=Recurring?
 
 
+class OptionSnapshot(Base):
+    __tablename__ = 'option_snapshots'
+    
+    conId = Column(Integer, primary_key=True)
+    symbol = Column(String(50))  # e.g. "RMS 260220 P 1860"
+    updated_at = Column(DateTime, default=datetime.utcnow)
+    
+    # Market Data
+    last_price = Column(Float)
+    delta = Column(Float)
+    gamma = Column(Float)
+    theta = Column(Float)
+    vega = Column(Float)
+    implied_vol = Column(Float)
+    underlying_price = Column(Float)
+
+
 

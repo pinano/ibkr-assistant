@@ -8,11 +8,24 @@ from fastapi.security.api_key import APIKeyHeader
 from ib_async import IB, Option, Contract, ExecutionFilter
 
 from src.config import settings
-from src.models import AccountSummary, PositionItem, CurrencyItem, OptionGreeks, OrderItem, TradeItem, ContractDetailsItem, MarketSnapshot, OptionChainItem
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker, Session
+from src.models import AccountSummary, PositionItem, CurrencyItem, OptionGreeks, OrderItem, TradeItem, ContractDetailsItem, MarketSnapshot, OptionChainItem, OptionSnapshot
 
 # Logging Setup
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("ibkr-api")
+
+# Database Setup
+engine = create_engine(settings.DB_URL, pool_pre_ping=True)
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
 
 app = FastAPI(title="IBKR API", version="1.0.0")
 ib = IB()
@@ -23,12 +36,20 @@ async def health_check():
     return {"status": "ok"}
 
 
-api_key_header = APIKeyHeader(name="X-API-Key")
+from fastapi.security import APIKeyHeader, APIKeyQuery
 
-async def verify_key(header: str = Depends(api_key_header)):
-    if header != settings.API_KEY:
-        raise HTTPException(status_code=403, detail="Invalid API Key")
-    return header
+api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
+api_key_query = APIKeyQuery(name="api_key", auto_error=False)
+
+async def verify_key(
+    header: str = Security(api_key_header),
+    query: str = Security(api_key_query)
+):
+    if header == settings.API_KEY:
+        return header
+    if query == settings.API_KEY:
+        return query
+    raise HTTPException(status_code=403, detail="Invalid API Key")
 
 # Market suffix mappings for international stocks
 MARKET_SUFFIXES = {
@@ -215,16 +236,20 @@ async def get_currencies():
 
 
 @app.get("/option/greeks", response_model=OptionGreeks, dependencies=[Depends(verify_key)])
-async def get_option_greeks(underlying: str, expiry: str, strike: float, right: str, conId: int = 0):
+async def get_option_greeks(
+    underlying: str, 
+    expiry: str, 
+    strike: float, 
+    right: str, 
+    conId: int = 0, 
+    force_refresh: bool = False, 
+    db: Session = Depends(get_db)
+):
     """
-    Fetch Greeks for an option using structured parameters.
-    
-    Args:
-        underlying: The underlying symbol (e.g. ASTS, RMS, ESTX50, DGE)
-        expiry: Expiration date in YYYYMMDD format (e.g. 20260320)
-        strike: Strike price (e.g. 45.0)
-        right: Option right: P or C
-        conId: Optional IBKR contract ID for guaranteed qualification
+    Fetch Greeks for an option. 
+    1. Checks DB cache first (valid for 20 mins).
+    2. Falls back to live IBKR query.
+    3. Updates DB cache on live fetch.
     """
     client = await get_ib()
     client.reqMarketDataType(4)  # Delayed-Frozen fallback
@@ -237,10 +262,7 @@ async def get_option_greeks(underlying: str, expiry: str, strike: float, right: 
         if right not in ('P', 'C'):
             raise HTTPException(status_code=400, detail=f"Invalid right: {right}. Must be P or C")
 
-        # Try to qualify: conId first (most reliable), then symbol-based
-        qualified = None
-        
-        # Auto-lookup conId from portfolio positions if not provided
+        # 0. Try to auto-lookup conId if missing
         if not conId:
             for p in client.positions():
                 c = p.contract
@@ -250,8 +272,27 @@ async def get_option_greeks(underlying: str, expiry: str, strike: float, right: 
                     and c.strike == strike
                     and c.right.upper() == right):
                     conId = c.conId
-                    logger.info(f"Auto-resolved conId={conId} from positions for {underlying} {expiry} {strike} {right}")
                     break
+
+        # 1. Check DB Cache (if not forced refresh)
+        from datetime import timedelta
+        if conId and not force_refresh:
+            snap = db.query(OptionSnapshot).filter(OptionSnapshot.conId == conId).first()
+            # Cache valid for 20 mins
+            if snap and snap.updated_at > datetime.utcnow() - timedelta(minutes=20):
+                logger.info(f"Serving cached greeks for conId={conId}")
+                return OptionGreeks(
+                    symbol=snap.symbol,
+                    delta=snap.delta or 0.0,
+                    gamma=snap.gamma or 0.0,
+                    vega=snap.vega or 0.0,
+                    theta=snap.theta or 0.0,
+                    implied_vol=snap.implied_vol or 0.0,
+                    underlying_price=snap.underlying_price or 0.0,
+                    last_price=snap.last_price or 0.0,
+                    volume=0,  # Not stored in snapshot yet
+                    open_interest=0
+                )
         
         if conId:
             contract = Option(conId=conId)
@@ -314,6 +355,26 @@ async def get_option_greeks(underlying: str, expiry: str, strike: float, right: 
             return val if (val is not None and not math.isnan(val)) else 0.0
         
         display_symbol = f"{underlying} {expiry} {strike} {right}"
+
+        # Update Cache
+        if qualified and qualified[0]:
+            cid = qualified[0].conId
+            snap = db.query(OptionSnapshot).filter(OptionSnapshot.conId == cid).first()
+            if not snap:
+                snap = OptionSnapshot(conId=cid)
+                db.add(snap)
+            
+            snap.symbol = display_symbol
+            snap.updated_at = datetime.utcnow()
+            snap.delta = safe_float(g.delta) if g else 0.0
+            snap.gamma = safe_float(g.gamma) if g else 0.0
+            snap.theta = safe_float(g.theta) if g else 0.0
+            snap.vega = safe_float(g.vega) if g else 0.0
+            snap.implied_vol = safe_float(g.impliedVol) if g else 0.0
+            snap.underlying_price = safe_float(g.undPrice) if g else 0.0
+            snap.last_price = safe_float(t_last)
+            
+            db.commit()
         
         return OptionGreeks(
             symbol=display_symbol,

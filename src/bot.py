@@ -1261,6 +1261,17 @@ async def main():
         id='alert_monitoring'
     )
     
+    # 7. Schedule: Greeks Cache Refresh (European Hours)
+    # Mon-Fri 09:00-18:00 every 15 mins
+    scheduler.add_job(
+        monitor.refresh_greeks_cache,
+        'cron',
+        day_of_week='mon-fri',
+        hour='9-18',
+        minute='*/15',
+        id='greeks_cache_refresh'
+    )
+    
     check_cron_log = check_cron if effective_check_mins else 'None (covered by snapshots)'
     logger.info(f"Scheduler configured: Snapshots at mins={snap_cron}, Checks at mins={check_cron_log}, Weekend at 12:00")
     

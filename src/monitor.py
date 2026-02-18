@@ -2,7 +2,7 @@ import logging
 import asyncio
 import httpx
 from sqlalchemy.orm import Session
-from src.models import Alert
+from src.models import Alert, OptionSnapshot
 from src.config import settings
 
 logger = logging.getLogger("ibkr-monitor")
@@ -157,14 +157,22 @@ class Monitor:
             if delta_alerts:
                 logger.info(f"Global Delta Alert: {len(delta_alerts)} contract(s) above threshold")
                 
+                # Calculate max display width for alignment
+                max_display = max(len(r['display']) for r in delta_alerts)
+                pad = max(max_display, 18)
+                
                 lines = [f"⚠️ <b>High Delta Warning — {len(delta_alerts)} Short Position(s)</b>\n"]
                 for a in delta_alerts:
+                    # In automated alerts, all are above threshold, so always red
+                    marker = "🔴"
+                    display_padded = a['display'].ljust(pad)
+                    delta_str = f"{a['delta']:+.3f}".rjust(7)
+                    qty_str = f"({a['qty']:.0f})".rjust(4)
+                    
                     lines.append(
-                        f"• <code>{a['display']}</code>  "
-                        f"Δ <code>{a['delta']:.3f}</code>  "
-                        f"Qty <code>{a['qty']:.0f}</code>"
+                        f"{marker} <code>{display_padded}  Δ {delta_str}  {qty_str}</code>"
                     )
-                lines.append(f"\n🔸 Threshold: <code>&gt; {self.GLOBAL_DELTA_THRESHOLD}</code>")
+                lines.append(f"\n🔴 abs(Δ) &gt; {self.GLOBAL_DELTA_THRESHOLD}")
                 
                 await notify_admins("\n".join(lines), parse_mode="HTML")
                 
@@ -176,4 +184,68 @@ class Monitor:
             logger.error(f"Error in check_alerts: {e}", exc_info=True)
         finally:
             session.close()
+
+    async def refresh_greeks_cache(self):
+        """
+        Periodically triggered job to force-refresh the Greeks cache for all open options.
+        Target: European options (but we do all for completeness).
+        """
+        logger.info("Executing periodic Greeks cache refresh...")
+        from src.config import settings
+        
+        # We need a dedicated client or use one-off
+        headers = {"X-API-Key": settings.API_KEY}
+        
+        try:
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                # 1. Fetch positions
+                try:
+                    r_pos = await client.get(f"{settings.WEB_SERVICE_URL}/account/positions", headers=headers)
+                    if r_pos.status_code != 200:
+                        logger.warning(f"Refresh failed: Could not fetch positions ({r_pos.status_code})")
+                        return
+                    
+                    positions = r_pos.json()
+                    options = [p for p in positions if p.get('secType') == 'OPT']
+                    
+                    if not options:
+                        logger.info("No options to refresh.")
+                        return
+
+                    logger.info(f"Refreshing cache for {len(options)} options...")
+                    
+                    # 2. Call API for each option with force_refresh=True
+                    # We limit concurrency to avoid overwhelming IBKR Gateway
+                    import asyncio
+                    semaphore = asyncio.Semaphore(5)
+                    
+                    async def refresh_one(opt):
+                        async with semaphore:
+                            try:
+                                params = {
+                                    'underlying': opt.get('underlying', ''),
+                                    'expiry': opt.get('expiry', ''),
+                                    'strike': opt.get('strike', 0),
+                                    'right': opt.get('right', ''),
+                                    'conId': opt.get('conId', 0),
+                                    'force_refresh': 'true'
+                                }
+                                # Verify essential params are present
+                                if not params['underlying'] or not params['expiry']:
+                                    return
+                                    
+                                await client.get(f"{settings.WEB_SERVICE_URL}/option/greeks", params=params, headers=headers)
+                            except Exception as e:
+                                logger.error(f"Error refreshing {opt.get('underlying')}: {e}")
+
+                    tasks = [refresh_one(opt) for opt in options]
+                    await asyncio.gather(*tasks)
+                    
+                    logger.info("Greeks cache refresh complete.")
+
+                except Exception as e:
+                    logger.error(f"Error checking positions/refreshing: {e}")
+
+        except Exception as e:
+            logger.error(f"Error in refresh_greeks_cache: {e}", exc_info=True)
 
