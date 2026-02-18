@@ -150,7 +150,7 @@ class OptionSnapshot(Base):
 
     conId = Column(Integer, primary_key=True)
     symbol = Column(String(50))  # e.g. "RMS 260220 P 1860"
-    updated_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.now)
 
     # Market Data
     last_price = Column(Float)

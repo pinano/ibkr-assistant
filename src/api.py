@@ -337,7 +337,7 @@ async def get_option_greeks(
                     OptionSnapshot.conId == conId).first()
 
             # If we have a fresh cache (< 60 mins), return it immediately
-            if not force_refresh and snap and snap.updated_at > datetime.utcnow() - \
+            if not force_refresh and snap and snap.updated_at > datetime.now() - \
                     timedelta(minutes=60):
                 logger.info(f"Serving fresh cached greeks for conId={conId}")
                 return OptionGreeks(
@@ -501,7 +501,7 @@ async def get_option_greeks(
                 db.add(snap)
 
             snap.symbol = display_symbol
-            snap.updated_at = datetime.utcnow()
+            snap.updated_at = datetime.now()
             snap.delta = safe_float(g.delta) if g else 0.0
             snap.gamma = safe_float(g.gamma) if g else 0.0
             snap.theta = safe_float(g.theta) if g else 0.0
