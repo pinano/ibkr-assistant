@@ -3,7 +3,7 @@ import asyncio
 import httpx
 import datetime
 from sqlalchemy.orm import Session
-from src.models import Alert
+
 from src.config import settings
 
 logger = logging.getLogger("ibkr-monitor")

@@ -134,15 +134,7 @@ class CashBalance(Base):
     maintMargin = Column(Numeric(18, 4))
 
 
-class Alert(Base):
-    __tablename__ = 'alerts'
-    id = Column(Integer, primary_key=True)
-    symbol = Column(String(50))
-    metric = Column(String(20))     # delta, gamma, theta, vega, price, iv
-    condition = Column(String(5))   # >, <
-    threshold = Column(Float)
-    # 0=Active, 1=Triggered (one-shot), 2=Recurring?
-    triggered = Column(Integer, default=0)
+
 
 
 class OptionSnapshot(Base):
