@@ -977,7 +977,10 @@ async def cmd_flex(m: types.Message):
 
 @dp.message(Command("alert", ignore_case=True))
 async def cmd_alert(m: types.Message):
-    if m.from_user.id not in settings.allowed_ids_list: return
+    logger.info(f"Received /alert command from user {m.from_user.id}: {m.text}")
+    if m.from_user.id not in settings.allowed_ids_list: 
+        logger.warning(f"Unauthorized /alert attempt from {m.from_user.id}")
+        return
 
     args = m.text.split()
     if len(args) < 2:

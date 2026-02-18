@@ -264,13 +264,10 @@ async def get_option_greeks(
 ):
     """
     Fetch Greeks for an option. 
-    1. Checks DB cache first (valid for 20 mins).
-    2. Falls back to live IBKR query.
-    3. Updates DB cache on live fetch.
+    1. Checks DB cache first (valid for 60 mins).
+    2. Falls back to live IBKR query if stale or forced.
+    3. Serves stale DB cache if live query fails or IBKR is disconnected.
     """
-    client = await get_ib()
-    client.reqMarketDataType(4)  # Delayed-Frozen fallback
-    
     try:
         right = right.upper().strip()
         underlying = underlying.strip()
@@ -279,25 +276,45 @@ async def get_option_greeks(
         if right not in ('P', 'C'):
             raise HTTPException(status_code=400, detail=f"Invalid right: {right}. Must be P or C")
 
-        # 0. Try to auto-lookup conId if missing
-        if not conId:
-            for p in client.positions():
-                c = p.contract
-                if (c.secType == 'OPT'
-                    and c.symbol.upper() == underlying.upper()
-                    and c.lastTradeDateOrContractMonth == expiry
-                    and c.strike == strike
-                    and c.right.upper() == right):
-                    conId = c.conId
-                    break
 
-        # 1. Check DB Cache (if not forced refresh)
         from datetime import timedelta
-        if conId and not force_refresh:
-            snap = db.query(OptionSnapshot).filter(OptionSnapshot.conId == conId).first()
-            # Cache valid for 20 mins
-            if snap and snap.updated_at > datetime.utcnow() - timedelta(minutes=20):
-                logger.info(f"Serving cached greeks for conId={conId}")
+        snap = None
+        
+        # 0. Try to resolve conId and/or snap from DB first if conId is missing
+        if not conId:
+            # Try to find a snapshot that matches the contract parameters
+            # Format in DB is: TICKER YYYYMMDD STRIKE RIGHT
+            # We use a pattern match to be flexible
+            pattern = f"{underlying}%{strike}%{right}"
+            snap = db.query(OptionSnapshot).filter(OptionSnapshot.symbol.like(pattern)).first()
+            if snap:
+                conId = snap.conId
+                logger.info(f"Resolved conId={conId} from database snapshot for {underlying}")
+
+        # 1. If we still don't have conId, try live positions (if possible)
+        if not conId:
+            try:
+                client = await get_ib()
+                for p in client.positions():
+                    c = p.contract
+                    if (c.secType == 'OPT'
+                        and c.symbol.upper() == underlying.upper()
+                        and c.lastTradeDateOrContractMonth == expiry
+                        and c.strike == strike
+                        and c.right.upper() == right):
+                        conId = c.conId
+                        break
+            except Exception:
+                logger.debug("Could not resolve conId via positions (Gateway down)")
+
+        # 2. Check Cache
+        if conId:
+            if not snap:
+                snap = db.query(OptionSnapshot).filter(OptionSnapshot.conId == conId).first()
+            
+            # If we have a fresh cache (< 60 mins), return it immediately
+            if not force_refresh and snap and snap.updated_at > datetime.utcnow() - timedelta(minutes=60):
+                logger.info(f"Serving fresh cached greeks for conId={conId}")
                 return OptionGreeks(
                     symbol=snap.symbol,
                     delta=snap.delta or 0.0,
@@ -307,40 +324,78 @@ async def get_option_greeks(
                     implied_vol=snap.implied_vol or 0.0,
                     underlying_price=snap.underlying_price or 0.0,
                     last_price=snap.last_price or 0.0,
-                    volume=0,  # Not stored in snapshot yet
+                    volume=0,
                     open_interest=0
                 )
         
-        if conId:
-            contract = Option(conId=conId)
-            qualified = await client.qualifyContractsAsync(contract)
-            if qualified and qualified[0]:
-                logger.info(f"Qualified option via conId={conId}")
-        
-        if not qualified or not qualified[0]:
-            # Fallback: try symbol-based qualification with parse_symbol
-            ticker, _, currency = parse_symbol(underlying)
-            contract = Option(ticker, expiry, strike, right, 'SMART', currency=currency)
-            qualified = await client.qualifyContractsAsync(contract)
-        
-            # Fallback: try symbol-based qualification via parallel execution for other currencies
+        # 3. If we get here, we want live data (or cache was stale)
+        qualified = None
+        try:
+            client = await get_ib()
+            client.reqMarketDataType(4)
+
+            if conId:
+                contract = Option(conId=conId)
+                qualified = await client.qualifyContractsAsync(contract)
+                if qualified and qualified[0]:
+                    logger.info(f"Qualified option via conId={conId}")
+            
             if not qualified or not qualified[0]:
-                alt_currencies = [c for c in ['USD', 'EUR', 'GBP', 'CHF'] if c != currency]
-                tasks = []
-                for alt in alt_currencies:
-                    c = Option(ticker, expiry, strike, right, 'SMART', currency=alt)
-                    tasks.append(client.qualifyContractsAsync(c))
-                
-                # Run all qualification attempts in parallel
-                results = await asyncio.gather(*tasks, return_exceptions=True)
-                
-                for res in results:
-                    if isinstance(res, list) and res and res[0]:
-                        qualified = res
-                        logger.info(f"Qualified option {underlying} {expiry} {strike} {right} via parallel fallback (currency={res[0].currency})")
-                        break
+                # Fallback: try symbol-based qualification with parse_symbol
+                ticker, _, currency = parse_symbol(underlying)
+                contract = Option(ticker, expiry, strike, right, 'SMART', currency=currency)
+                qualified = await client.qualifyContractsAsync(contract)
+            
+                # Fallback: try symbol-based qualification via parallel execution for other currencies
+                if not qualified or not qualified[0]:
+                    alt_currencies = [c for c in ['USD', 'EUR', 'GBP', 'CHF'] if c != currency]
+                    tasks = []
+                    for alt in alt_currencies:
+                        c = Option(ticker, expiry, strike, right, 'SMART', currency=alt)
+                        tasks.append(client.qualifyContractsAsync(c))
+                    
+                    # Run all qualification attempts in parallel
+                    results = await asyncio.gather(*tasks, return_exceptions=True)
+                    
+                    for res in results:
+                        if isinstance(res, list) and res and res[0]:
+                            qualified = res
+                            logger.info(f"Qualified option {underlying} {expiry} {strike} {right} via parallel fallback (currency={res[0].currency})")
+                            break
+        except Exception as e:
+            logger.warning(f"Live qualification failed: {e}")
+            if snap:
+                logger.info("Connection failed, falling back to STALE cache")
+                return OptionGreeks(
+                    symbol=snap.symbol,
+                    delta=snap.delta or 0.0,
+                    gamma=snap.gamma or 0.0,
+                    vega=snap.vega or 0.0,
+                    theta=snap.theta or 0.0,
+                    implied_vol=snap.implied_vol or 0.0,
+                    underlying_price=snap.underlying_price or 0.0,
+                    last_price=snap.last_price or 0.0,
+                    volume=0,
+                    open_interest=0
+                )
+            raise e # re-raise to be caught by outer block or handled as 503
+
         
         if not qualified or not qualified[0]:
+            if snap:
+                logger.warning(f"Contract qualification failed for {underlying}, serving STALE cache.")
+                return OptionGreeks(
+                    symbol=snap.symbol,
+                    delta=snap.delta or 0.0,
+                    gamma=snap.gamma or 0.0,
+                    vega=snap.vega or 0.0,
+                    theta=snap.theta or 0.0,
+                    implied_vol=snap.implied_vol or 0.0,
+                    underlying_price=snap.underlying_price or 0.0,
+                    last_price=snap.last_price or 0.0,
+                    volume=0,
+                    open_interest=0
+                )
             raise HTTPException(status_code=404, detail=f"Option contract not found: {underlying} {expiry} {strike} {right}")
         
         # Request market data and wait for Greeks
@@ -357,8 +412,22 @@ async def get_option_greeks(
         
         client.cancelMktData(qualified[0])
         
-        if not t:
-            raise HTTPException(status_code=404, detail="No market data received after waiting")
+        if not t or not (t.modelGreeks or t.bidGreeks or t.askGreeks or t.lastGreeks or (t.last is not None and not math.isnan(t.last))):
+            if snap:
+                logger.warning(f"No live data received for {underlying}, serving STALE cache.")
+                return OptionGreeks(
+                    symbol=snap.symbol,
+                    delta=snap.delta or 0.0,
+                    gamma=snap.gamma or 0.0,
+                    vega=snap.vega or 0.0,
+                    theta=snap.theta or 0.0,
+                    implied_vol=snap.implied_vol or 0.0,
+                    underlying_price=snap.underlying_price or 0.0,
+                    last_price=snap.last_price or 0.0,
+                    volume=0,
+                    open_interest=0
+                )
+            raise HTTPException(status_code=404, detail="No live market data received and no cache available")
         
         g = t.modelGreeks or t.bidGreeks or t.askGreeks or t.lastGreeks
         
