@@ -58,7 +58,7 @@ PROJECT_ID=${PROJECT_ID:-ibkr}
 
 # 4. Start Services
 echo "Starting Docker services..."
-docker compose up -d --build --force-recreate --remove-orphans
+docker compose -f docker-compose.yaml up -d --build --force-recreate --remove-orphans
 
 echo "---------------------------------------------------"
 echo "Stack started successfully!"

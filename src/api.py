@@ -240,6 +240,19 @@ async def get_option_greeks(underlying: str, expiry: str, strike: float, right: 
         # Try to qualify: conId first (most reliable), then symbol-based
         qualified = None
         
+        # Auto-lookup conId from portfolio positions if not provided
+        if not conId:
+            for p in client.positions():
+                c = p.contract
+                if (c.secType == 'OPT'
+                    and c.symbol.upper() == underlying.upper()
+                    and c.lastTradeDateOrContractMonth == expiry
+                    and c.strike == strike
+                    and c.right.upper() == right):
+                    conId = c.conId
+                    logger.info(f"Auto-resolved conId={conId} from positions for {underlying} {expiry} {strike} {right}")
+                    break
+        
         if conId:
             contract = Option(conId=conId)
             qualified = await client.qualifyContractsAsync(contract)
@@ -247,7 +260,8 @@ async def get_option_greeks(underlying: str, expiry: str, strike: float, right: 
                 logger.info(f"Qualified option via conId={conId}")
         
         if not qualified or not qualified[0]:
-            # Fallback: try symbol-based qualification
+            # Fallback: try symbol-based qualification with parse_symbol
+            ticker, _, currency = parse_symbol(underlying)
             contract = Option(ticker, expiry, strike, right, 'SMART', currency=currency)
             qualified = await client.qualifyContractsAsync(contract)
         

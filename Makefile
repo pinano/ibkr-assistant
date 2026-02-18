@@ -1,3 +1,5 @@
+COMPOSE = docker compose -f docker-compose.yaml
+
 .PHONY: init start stop rebuild logs status help
 
 # Default target
@@ -24,11 +26,11 @@ stop:
 	@bash src/stop.sh
 
 rebuild:
-	docker compose build --no-cache
-	docker compose up -d --force-recreate --remove-orphans
+	$(COMPOSE) build --no-cache
+	$(COMPOSE) up -d --force-recreate --remove-orphans
 
 logs:
-	docker compose logs -f
+	$(COMPOSE) logs -f
 
 status:
-	docker compose ps
+	$(COMPOSE) ps

@@ -18,7 +18,7 @@ def sortchildrenby(parent, attr_1, attr_2=None):
 def fmt_num(val, precision=2):
     try:
         f = float(val)
-        # Spanish numbering system uses comma as decimal separator
+        # European format: comma as decimal separator
         return ('{:.' + str(precision) + 'f}').format(round(f, precision)).replace('.', ',')
     except (ValueError, TypeError):
         return val

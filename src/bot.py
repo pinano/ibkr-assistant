@@ -619,6 +619,7 @@ async def cmd_help(m: types.Message):
         "📊 /today - Today's NAV Min/Max/Current\n"
         "📅 /year [YYYY] - Year's NAV Min/Max/Diff/Var%\n"
         "📊 /flex [PARAM] - Manual Flex Report (PARAM: monthly|YYYYMMDD)\n"
+        "⚠️ /delta - Check high delta short positions now\n"
         "❓ /help - Show this help message"
     )
 
@@ -1063,6 +1064,106 @@ async def cmd_alert(m: types.Message):
         await m.answer(f"❌ Error: {e}")
     finally:
         session.close()
+
+@dp.message(Command("delta", ignore_case=True))
+async def cmd_delta(m: types.Message):
+    """On-demand check: show all short option positions with high delta."""
+    if m.from_user.id not in settings.allowed_ids_list: return
+    
+    await m.answer("Checking deltas for short positions... ⏳")
+    
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            # Fetch positions
+            r_pos = await client.get(
+                f"{settings.WEB_SERVICE_URL}/account/positions",
+                headers=API_HEADERS
+            )
+            if r_pos.status_code != 200:
+                await m.answer(f"❌ Failed to fetch positions (HTTP {r_pos.status_code})")
+                return
+            
+            positions = r_pos.json()
+            short_options = [
+                p for p in positions
+                if p.get('secType') == 'OPT' and p.get('qty', 0) < 0
+            ]
+            
+            if not short_options:
+                await m.answer("✅ No short option positions found.")
+                return
+            
+            # Fetch Greeks for each short option
+            results = []
+            for opt in short_options:
+                con_id = opt.get('conId', 0)
+                if not con_id:
+                    continue
+                try:
+                    params = {
+                        'underlying': opt.get('underlying', ''),
+                        'expiry': opt.get('expiry', ''),
+                        'strike': opt.get('strike', 0),
+                        'right': opt.get('right', ''),
+                        'conId': con_id
+                    }
+                    r = await client.get(
+                        f"{settings.WEB_SERVICE_URL}/option/greeks",
+                        params=params, headers=API_HEADERS
+                    )
+                    if r.status_code == 200:
+                        data = r.json()
+                        delta = data.get('delta', 0.0)
+                        if abs(delta) < 0.0001:
+                            continue
+                        
+                        underlying = opt.get('underlying', '??')
+                        right = opt.get('right', '?')
+                        strike = opt.get('strike', 0)
+                        expiry = opt.get('expiry', '')
+                        qty = opt.get('qty', 0)
+                        
+                        strike_fmt = f"{strike:.0f}" if strike == int(strike) else f"{strike}"
+                        exp_fmt = f"{expiry[0:4]}-{expiry[4:6]}-{expiry[6:8]}" if len(expiry) == 8 else expiry
+                        display = f"{underlying} {right} {strike_fmt} {exp_fmt}"
+                        
+                        results.append({
+                            'display': display,
+                            'delta': delta,
+                            'qty': qty,
+                            'high': abs(delta) > monitor.GLOBAL_DELTA_THRESHOLD
+                        })
+                except Exception as e:
+                    logger.debug(f"Error fetching greeks for conId={con_id}: {e}")
+            
+            if not results:
+                await m.answer("✅ No delta data available for short positions.")
+                return
+            
+            # Sort by absolute delta descending
+            results.sort(key=lambda x: abs(x['delta']), reverse=True)
+            
+            # Build digest message
+            high_count = sum(1 for r in results if r['high'])
+            header = f"📊 <b>Delta Report — {len(results)} Short Position(s)</b>\n"
+            if high_count:
+                header += f"⚠️ <b>{high_count} above threshold ({monitor.GLOBAL_DELTA_THRESHOLD})</b>\n"
+            
+            lines = [header]
+            for r in results:
+                marker = "🔴" if r['high'] else "🟢"
+                lines.append(
+                    f"{marker} <code>{r['display']}</code>  "
+                    f"Δ <code>{r['delta']:.3f}</code>  "
+                    f"Qty <code>{r['qty']:.0f}</code>"
+                )
+            
+            await m.answer("\n".join(lines), parse_mode="HTML")
+    
+    except Exception as e:
+        logger.error(f"Error in /delta: {e}", exc_info=True)
+        await m.answer(f"❌ Error: {e}")
+
 
 async def main():
     # 1. Schedule: Tue,Wed,Thu,Fri,Sat for Flex Query Reports
