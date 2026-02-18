@@ -1253,11 +1253,11 @@ async def main():
         id='weekend_cash_control'
     )
 
-    # 6. Schedule: Alert Monitoring (every 5 mins)
+    # 6. Schedule: Alert Monitoring
     scheduler.add_job(
         monitor.check_alerts,
         'interval',
-        minutes=5,
+        seconds=settings.ALERT_CHECK_INTERVAL,
         id='alert_monitoring'
     )
     

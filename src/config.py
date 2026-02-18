@@ -23,6 +23,7 @@ class Settings(BaseSettings):
     TELEGRAM_ALLOWED_IDS: str = ""  # Comma separated list of IDs
     CASH_DIFFERENCE_CHECK_INTERVAL: int = 300
     DB_INSERT_INTERVAL: int = 1800
+    ALERT_CHECK_INTERVAL: int = 300
     
     @property
     def WEB_SERVICE_URL(self) -> str:
