@@ -110,9 +110,7 @@ async def get_ib():
         delay = 2
         for i in range(retries):
             try:
-                logger.info(
-                    f"Connecting to IBKR Gateway (Attempt {
-                        i + 1}/{retries})...")
+                logger.info(f"Connecting to IBKR Gateway (Attempt {i + 1}/{retries})...")
                 await ib.connectAsync(
                     settings.IB_HOST,
                     settings.IB_PORT,
@@ -405,9 +403,7 @@ async def get_option_greeks(
                     for res in results:
                         if isinstance(res, list) and res and res[0]:
                             qualified = res
-                            logger.info(
-                                f"Qualified option {underlying} {expiry} {strike} {right} via parallel fallback (currency={
-                                    res[0].currency})")
+                            logger.info(f"Qualified option {underlying} {expiry} {strike} {right} via parallel fallback (currency={res[0].currency})")
                             break
         except Exception as e:
             logger.warning(f"Live qualification failed: {e}")
@@ -844,10 +840,7 @@ async def get_market_snapshot(symbol: str):
                             secType="CASH",
                             exchange="IDEALPRO",
                             currency=symbol[3:])
-        logger.info(
-            f"Detected FX pair {symbol}, using CASH contract: {
-                contract.symbol}.{
-                contract.currency}")
+        logger.info(f"Detected FX pair {symbol}, using CASH contract: {contract.symbol}.{contract.currency}")
     else:
         # Parse symbol for international stocks (e.g., BATS.L -> LSE/GBP)
         ticker, exchange, currency = parse_symbol(symbol)
