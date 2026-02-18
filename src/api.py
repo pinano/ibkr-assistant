@@ -13,7 +13,7 @@ from ib_async import IB, Option, Contract, ExecutionFilter
 from src.config import settings
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, Session
-from src.models import AccountSummary, PositionItem, CurrencyItem, OptionGreeks, OrderItem, TradeItem, MarketSnapshot, OptionChainItem, OptionSnapshot, MarketCache
+from src.models import AccountSummary, PositionItem, CurrencyItem, OptionGreeks, OrderItem, TradeItem, ContractDetailsItem, MarketSnapshot, OptionChainItem, OptionSnapshot, MarketCache
 
 # Logging Setup
 logging.basicConfig(level=logging.INFO)
