@@ -21,6 +21,8 @@ class Settings(BaseSettings):
     # Telegram Bot (Only required by Bot)
     TELEGRAM_TOKEN: str = ""
     TELEGRAM_ALLOWED_IDS: str = ""  # Comma separated list of IDs
+    CASH_DIFFERENCE_CHECK_INTERVAL: int = 300
+    DB_INSERT_INTERVAL: int = 1800
     
     @property
     def WEB_SERVICE_URL(self) -> str:
@@ -34,8 +36,6 @@ class Settings(BaseSettings):
             return [int(x.strip()) for x in self.TELEGRAM_ALLOWED_IDS.split(",") if x.strip()]
         except ValueError:
             return []
-    CASH_DIFFERENCE_CHECK_INTERVAL: int = 300
-    DB_INSERT_INTERVAL: int = 1800
 
     # Flex Query & Email (Only required by Bot)
     IB_FLEX_TOKEN: str = ""

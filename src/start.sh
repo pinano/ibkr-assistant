@@ -56,7 +56,7 @@ if [ -f ".env" ]; then
 fi
 PROJECT_ID=${PROJECT_ID:-ibkr}
 
-# 3. Start Services
+# 4. Start Services
 echo "Starting Docker services..."
 docker compose up -d --build --force-recreate --remove-orphans
 

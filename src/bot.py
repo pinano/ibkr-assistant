@@ -10,7 +10,8 @@ from sqlalchemy.orm import sessionmaker
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from src.flex import FlexReporter
 from src.config import settings
-from src.models import Base, CashBalance
+from src.models import Base, CashBalance, Alert
+from src.monitor import Monitor
 
 # Logging
 logging.basicConfig(level=logging.INFO)
@@ -34,6 +35,9 @@ if not settings.DB_URL:
 # Bot Setup
 bot = Bot(token=settings.TELEGRAM_TOKEN)
 dp = Dispatcher()
+scheduler = AsyncIOScheduler()
+monitor = Monitor(SessionLocal)
+
 
 
 async def notify_admins(text: str, parse_mode: str = "Markdown"):
@@ -303,7 +307,7 @@ async def cmd_options(m: types.Message):
                 
                 builder.row(types.InlineKeyboardButton(
                     text=f"{label} ({opt['qty']})",
-                    callback_data=f"opt_details:{opt['symbol'].strip()}"
+                    callback_data=f"opt:{opt.get('underlying','')}|{opt.get('expiry','')}|{opt.get('strike',0)}|{opt.get('right','')}|{opt.get('conId',0)}"
                 ))
             
             await m.answer("📑 *Open Option Positions*", 
@@ -319,19 +323,40 @@ async def cmd_options(m: types.Message):
             msg = str(e) or repr(e)
             await m.answer(f"❌ Error: {msg}")
 
-@dp.callback_query(F.data.startswith("opt_details:"))
+@dp.callback_query(F.data == "noop")
+async def process_noop(callback: types.CallbackQuery):
+    await callback.answer()
+
+@dp.callback_query(F.data.startswith("opt:"))
 async def process_opt_details(callback: types.CallbackQuery):
-    symbol = callback.data.split(":")[1]
+    # Parse structured data: opt:UNDERLYING|EXPIRY|STRIKE|RIGHT|CONID
+    try:
+        parts = callback.data[4:].split("|")
+        underlying, expiry, strike_str, right = parts[0], parts[1], parts[2], parts[3]
+        strike = float(strike_str)
+        con_id = int(parts[4]) if len(parts) > 4 else 0
+    except (ValueError, IndexError):
+        await callback.message.answer("❌ Invalid option data in callback.")
+        await callback.answer()
+        return
     
     async with httpx.AsyncClient(timeout=30.0) as client:
         try:
-            r = await client.get(f"{settings.WEB_SERVICE_URL}/option/risk/{symbol}", headers=API_HEADERS)
+            r = await client.get(
+                f"{settings.WEB_SERVICE_URL}/option/greeks",
+                params={"underlying": underlying, "expiry": expiry, "strike": strike, "right": right, "conId": con_id},
+                headers=API_HEADERS
+            )
             r.raise_for_status()
             d = r.json()
             
-            # Format using requested fields and emojis
+            # Format display label
+            strike_fmt = f"{strike:.0f}" if strike == int(strike) else f"{strike}"
+            exp_fmt = f"{expiry[0:4]}-{expiry[4:6]}-{expiry[6:8]}" if len(expiry) == 8 else expiry
+            display = f"{underlying} {right} {strike_fmt} {exp_fmt}"
+            
             msg = (
-                f"📊 *Option Details: {symbol}*\n\n"
+                f"📊 *Option Details: {display}*\n\n"
                 f"🧮 *Greeks:*\n"
                 f"• Δ Delta: `{d['delta']:.4f}`\n"
                 f"• γ Gamma: `{d['gamma']:.4f}`\n"
@@ -820,8 +845,6 @@ async def cmd_chain(m: types.Message):
 
 # Scheduler
 
-scheduler = AsyncIOScheduler()
-
 async def check_token_expiry():
     if not settings.IB_FLEX_TOKEN_EXPIRY:
         return
@@ -949,6 +972,98 @@ async def cmd_flex(m: types.Message):
         await m.answer("Generating Daily Flex Query Report... ⏳")
         await scheduled_flex_report(query_id=settings.IB_FLEX_DAILY_QUERY_ID, report_type="Daily")
 
+# --- Alert Commands ---
+
+@dp.message(Command("alert", ignore_case=True))
+async def cmd_alert(m: types.Message):
+    if m.from_user.id not in settings.allowed_ids_list: return
+
+    args = m.text.split()
+    if len(args) < 2:
+        await m.answer(
+            "ℹ️ *Alert Commands:*\n"
+            "• `/alert list` - Show active alerts\n"
+            "• `/alert add <SYMBOL> <METRIC> <COND> <VAL>`\n"
+            "   (e.g. `/alert add ASTS delta > 0.5`)\n"
+            "• `/alert del <ID>` - Delete alert by ID",
+            parse_mode="Markdown"
+        )
+        return
+
+    action = args[1].lower()
+    
+    session = SessionLocal()
+    try:
+        if action == "list":
+            alerts = session.query(Alert).all()
+            if not alerts:
+                await m.answer("📭 No alerts set.")
+                return
+            
+            msg = "🚨 *Active Alerts:*\n"
+            for a in alerts:
+                status = "✅" if a.triggered == 0 else "❌ (Triggered)"
+                msg += f"• <b>ID {a.id}</b>: <code>{a.symbol} {a.metric} {a.condition} {a.threshold}</code> {status}\n"
+            await m.answer(msg, parse_mode="HTML")
+
+        elif action == "add":
+            # Usage: /alert add ASTS delta > 0.5
+            if len(args) < 6:
+                await m.answer("❌ Usage: `/alert add <SYMBOL> <METRIC> <COND> <VAL>`")
+                return
+            
+            symbol = args[2].upper()
+            metric = args[3].lower()
+            cond = args[4]
+            try:
+                val = float(args[5])
+            except ValueError:
+                await m.answer("❌ Value must be a number.")
+                return
+
+            if cond not in ('>', '<'):
+                await m.answer("❌ Condition must be > or <.")
+                return
+            
+            valid_metrics = ['delta', 'gamma', 'vega', 'theta', 'iv', 'price', 'underlying']
+            if metric not in valid_metrics:
+                await m.answer(f"❌ Metric must be one of: {', '.join(valid_metrics)}")
+                return
+
+            alert = Alert(symbol=symbol, metric=metric, condition=cond, threshold=val)
+            session.add(alert)
+            session.commit()
+            await m.answer(f"✅ Alert added: `{symbol} {metric} {cond} {val}`", parse_mode="Markdown")
+
+        elif action == "del":
+            if len(args) < 3:
+                await m.answer("❌ Usage: `/alert del <ID>`")
+                return
+            
+            try:
+                a_id = int(args[2])
+            except ValueError:
+                await m.answer("❌ ID must be a number.")
+                return
+
+            alert = session.query(Alert).filter(Alert.id == a_id).first()
+            if not alert:
+                await m.answer(f"❌ Alert ID {a_id} not found.")
+                return
+            
+            session.delete(alert)
+            session.commit()
+            await m.answer(f"🗑️ Alert {a_id} deleted.")
+        
+        else:
+             await m.answer("❌ Unknown action. Use `add`, `list`, or `del`.")
+
+    except Exception as e:
+        logger.error(f"Error in /alert: {e}", exc_info=True)
+        await m.answer(f"❌ Error: {e}")
+    finally:
+        session.close()
+
 async def main():
     # 1. Schedule: Tue,Wed,Thu,Fri,Sat for Flex Query Reports
     # Parse configured time (default 07:30)
@@ -1029,8 +1144,17 @@ async def main():
         max_instances=1,
         id='weekend_cash_control'
     )
+
+    # 6. Schedule: Alert Monitoring (every 5 mins)
+    scheduler.add_job(
+        monitor.check_alerts,
+        'interval',
+        minutes=5,
+        id='alert_monitoring'
+    )
     
-    logger.info(f"Scheduler configured: Snapshots at mins={snap_cron}, Checks at mins={check_cron if effective_check_mins else 'None'}, Weekend at 12:00")
+    check_cron_log = check_cron if effective_check_mins else 'None (covered by snapshots)'
+    logger.info(f"Scheduler configured: Snapshots at mins={snap_cron}, Checks at mins={check_cron_log}, Weekend at 12:00")
     
     scheduler.start()
     

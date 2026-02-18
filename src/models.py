@@ -34,6 +34,7 @@ class PositionItem(BaseModel):
     qty: float
     cost: float
     secType: str = "STK"
+    conId: int = 0
     expiry: Optional[str] = None
     strike: Optional[float] = None
     right: Optional[str] = None
@@ -128,5 +129,16 @@ class CashBalance(Base):
     buyingPower = Column(Numeric(18, 4))
     excessLiq = Column(Numeric(18, 4))
     maintMargin = Column(Numeric(18, 4))
+
+
+class Alert(Base):
+    __tablename__ = 'alerts'
+    id = Column(Integer, primary_key=True)
+    symbol = Column(String(50))
+    metric = Column(String(20))     # delta, gamma, theta, vega, price, iv
+    condition = Column(String(5))   # >, <
+    threshold = Column(Float)
+    triggered = Column(Integer, default=0) # 0=Active, 1=Triggered (one-shot), 2=Recurring?
+
 
 

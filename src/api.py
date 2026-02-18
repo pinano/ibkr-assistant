@@ -192,7 +192,8 @@ async def get_positions():
             symbol=p.contract.localSymbol, 
             qty=p.position, 
             cost=p.avgCost,
-            secType=p.contract.secType
+            secType=p.contract.secType,
+            conId=p.contract.conId
         )
         if p.contract.secType == 'OPT':
             item.expiry = p.contract.lastTradeDateOrContractMonth
@@ -212,6 +213,106 @@ async def get_currencies():
     ]
 
 
+
+@app.get("/option/greeks", response_model=OptionGreeks, dependencies=[Depends(verify_key)])
+async def get_option_greeks(underlying: str, expiry: str, strike: float, right: str, conId: int = 0):
+    """
+    Fetch Greeks for an option using structured parameters.
+    
+    Args:
+        underlying: The underlying symbol (e.g. ASTS, RMS, ESTX50, DGE)
+        expiry: Expiration date in YYYYMMDD format (e.g. 20260320)
+        strike: Strike price (e.g. 45.0)
+        right: Option right: P or C
+        conId: Optional IBKR contract ID for guaranteed qualification
+    """
+    client = await get_ib()
+    client.reqMarketDataType(4)  # Delayed-Frozen fallback
+    
+    try:
+        right = right.upper().strip()
+        underlying = underlying.strip()
+        expiry = expiry.strip()
+        
+        if right not in ('P', 'C'):
+            raise HTTPException(status_code=400, detail=f"Invalid right: {right}. Must be P or C")
+
+        # Try to qualify: conId first (most reliable), then symbol-based
+        qualified = None
+        
+        if conId:
+            contract = Option(conId=conId)
+            qualified = await client.qualifyContractsAsync(contract)
+            if qualified and qualified[0]:
+                logger.info(f"Qualified option via conId={conId}")
+        
+        if not qualified or not qualified[0]:
+            # Fallback: try symbol-based qualification
+            contract = Option(ticker, expiry, strike, right, 'SMART', currency=currency)
+            qualified = await client.qualifyContractsAsync(contract)
+        
+            # If qualification fails, try alternative currencies
+            if not qualified or not qualified[0]:
+                for alt_currency in ['USD', 'EUR', 'GBP', 'CHF']:
+                    if alt_currency == currency:
+                        continue
+                    contract = Option(ticker, expiry, strike, right, 'SMART', currency=alt_currency)
+                    qualified = await client.qualifyContractsAsync(contract)
+                    if qualified and qualified[0]:
+                        logger.info(f"Qualified option {underlying} {expiry} {strike} {right} with currency {alt_currency}")
+                        break
+        
+        if not qualified or not qualified[0]:
+            raise HTTPException(status_code=404, detail=f"Option contract not found: {underlying} {expiry} {strike} {right}")
+        
+        # Request market data and wait for Greeks
+        client.reqMktData(qualified[0], '', False, False)
+        
+        t = None
+        for _ in range(50):  # Wait up to 5 seconds
+            await asyncio.sleep(0.1)
+            t = client.ticker(qualified[0])
+            if t:
+                g = t.modelGreeks or t.bidGreeks or t.askGreeks or t.lastGreeks
+                if g or (t.last is not None and not math.isnan(t.last)):
+                    break
+        
+        client.cancelMktData(qualified[0])
+        
+        if not t:
+            raise HTTPException(status_code=404, detail="No market data received after waiting")
+        
+        g = t.modelGreeks or t.bidGreeks or t.askGreeks or t.lastGreeks
+        
+        t_vol = getattr(t, 'volume', None)
+        t_oi = getattr(t, 'openInterest', None)
+        t_last = getattr(t, 'last', None)
+        t_time = getattr(t, 'lastTime', None)
+        
+        def safe_float(val):
+            """Return 0.0 if val is None or NaN."""
+            return val if (val is not None and not math.isnan(val)) else 0.0
+        
+        display_symbol = f"{underlying} {expiry} {strike} {right}"
+        
+        return OptionGreeks(
+            symbol=display_symbol,
+            delta=safe_float(g.delta) if g else 0.0,
+            gamma=safe_float(g.gamma) if g else 0.0,
+            vega=safe_float(g.vega) if g else 0.0,
+            theta=safe_float(g.theta) if g else 0.0,
+            implied_vol=safe_float(g.impliedVol) if g else 0.0,
+            underlying_price=safe_float(g.undPrice) if g else 0.0,
+            volume=int(t_vol) if (t_vol is not None and not math.isnan(t_vol)) else 0,
+            open_interest=int(t_oi) if (t_oi is not None and not math.isnan(t_oi)) else 0,
+            last_price=t_last if (t_last is not None and not math.isnan(t_last)) else 0.0,
+            last_date=t_time.strftime("%Y-%m-%d %H:%M:%S") if t_time else None
+        )
+        
+    except Exception as e:
+        if isinstance(e, HTTPException): raise e
+        logger.error(f"Error fetching option greeks for {underlying} {expiry} {strike} {right}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/option/risk/{symbol}", response_model=OptionGreeks, dependencies=[Depends(verify_key)])
 async def get_option_risk(symbol: str):

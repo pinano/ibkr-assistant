@@ -20,7 +20,7 @@ def fmt_num(val, precision=2):
         f = float(val)
         # Spanish numbering system uses comma as decimal separator
         return ('{:.' + str(precision) + 'f}').format(round(f, precision)).replace('.', ',')
-    except:
+    except (ValueError, TypeError):
         return val
 
 class FlexReporter:
@@ -52,10 +52,10 @@ class FlexReporter:
                         tree = ET.ElementTree(ET.fromstring(response))
                         root = tree.getroot()
                     except Exception as e:
-                         return f"Error parsing local XML: {e}", None, [], None
+                         return f"Error parsing local XML: {e}", None, None, [], None
                          
                 except Exception as e:
-                    return f"Error reading local file {local_date}.xml: {e}", None, [], None
+                    return f"Error reading local file {local_date}.xml: {e}", None, None, [], None
             else:
                 try:
                     response = ibflex_client.download(token, query_id)

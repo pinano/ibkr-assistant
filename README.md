@@ -33,10 +33,10 @@ The stack consists of 4 Docker services:
 - A Telegram Bot Token (@BotFather) & your Telegram User ID (@userinfobot)
 
 ### 2. Initialization
-Run the initialization script to generate your environment configuration. This script handles sensitive secret generation securely.
+Run the initialization command to generate your environment configuration. This script handles sensitive secret generation securely.
 
 ```bash
-./initialize-env.sh
+make init
 ```
 
 You will be prompted to enter:
@@ -54,24 +54,21 @@ Configuration is managed in `.env` (generated from `.env.dist`). Key variables t
 *   `CASH_DIFFERENCE_CHECK_INTERVAL`: Frequency (in seconds) to check for cash balance changes and send alerts. Default: `300` (5 minutes). Database records are only inserted when changes are detected.
 *   `DB_INSERT_INTERVAL`: Frequency (in seconds) for periodic database snapshots. Default: `1800` (30 minutes). This ensures historical data is captured even without cash changes.
 *   `TELEGRAM_ALLOWED_IDS`: Authorization list for bot commands.
-*   `TRAEFIK_...`: If running behind a Traefik proxy.
+*   `DOMAIN` / `CERT_RESOLVER`: If running behind a Traefik proxy.
 
 ## 🕹 Operation
 
-### Management Scripts
-The project includes convenience scripts for lifecycle management:
+### Management Commands
+The project uses a `Makefile` for lifecycle management:
 
-*   **Start Stack**:
-    ```bash
-    ./start.sh
-    ```
-    *Builds images (if needed), ensures directories exist, and starts services detached.*
-
-*   **Stop Stack**:
-    ```bash
-    ./stop.sh
-    ```
-    *Stops and removes containers.*
+| Command | Description |
+| :--- | :--- |
+| `make init` | Initialize `.env` from `.env.dist` (interactive wizard) |
+| `make start` | Sync `.env` with `.env.dist`, build images, and start services |
+| `make stop` | Stop and remove containers |
+| `make rebuild` | Rebuild images from scratch and recreate all containers |
+| `make logs` | Tail logs from all containers |
+| `make status` | Show container status |
 
 ### 🤖 Telegram Bot Commands
 
@@ -134,11 +131,11 @@ Use suffix notation to query non-US stocks:
 You can run multiple independent instances of this stack on the same machine (e.g., for different IBKR accounts or domains). 
 
 1.  **Clone or Copy the project** into a new directory (e.g., `ibkr-instance-2`).
-2.  **Run `./initialize-env.sh`**.
+2.  **Run `make init`**.
 3.  **Set a unique `PROJECT_ID`** (e.g., `ibkr-personal`, `ibkr-trading`).
 4.  **Set a unique `MARIADB_HOST_PORT`** (e.g., `3307`, `3308`) to avoid port conflicts.
 5.  **Configure unique credentials and domain**.
-6.  **Start with `./start.sh`**.
+6.  **Start with `make start`**.
 
 Each instance will have its own isolated database, containers, and Traefik routing rules.
 
