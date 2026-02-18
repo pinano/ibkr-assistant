@@ -15,11 +15,9 @@ if [ -f ".env" ]; then
     ENV_FILE=".env"
     ADDED=0
 
-    # Ensure we use a clean temp file
-    > "$TEMP_ENV"
-
+    # 1. First, sync everything from .env.dist
     while IFS= read -r line || [ -n "$line" ]; do
-        # Preserve comments and empty lines
+        # Preserve comments and empty lines from dist
         if [[ -z "$line" ]] || [[ "$line" == \#* ]]; then
             echo "$line" >> "$TEMP_ENV"
             continue
@@ -41,6 +39,28 @@ if [ -f ".env" ]; then
             echo "$line" >> "$TEMP_ENV"
         fi
     done < "$DIST_FILE"
+
+    # 2. Check for extra variables in .env that are NOT in .env.dist
+    # Collect all keys from .env.dist
+    DIST_KEYS=$(grep -o '^[^#]*=' "$DIST_FILE" | cut -d= -f1)
+    
+    # Iterate over .env
+    HAS_UNDEFINED=0
+    while IFS= read -r line || [ -n "$line" ]; do
+        if [[ "$line" == *=* ]] && [[ ! "$line" == \#* ]]; then
+            key=$(echo "$line" | cut -d= -f1 | tr -d '[:space:]')
+            
+            # Check if this key is in DIST_KEYS
+            if ! echo "$DIST_KEYS" | grep -q "^${key}$"; then
+                if [ $HAS_UNDEFINED -eq 0 ]; then
+                    echo "" >> "$TEMP_ENV"
+                    echo "# --- DEPRECATED / CUSTOM VARIABLES ---" >> "$TEMP_ENV"
+                    HAS_UNDEFINED=1
+                fi
+                echo "# UNDEFINED: $line" >> "$TEMP_ENV"
+            fi
+        fi
+    done < "$ENV_FILE"
 
     mv "$TEMP_ENV" "$ENV_FILE"
     chmod 600 "$ENV_FILE"

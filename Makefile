@@ -13,6 +13,7 @@ help:
 	@echo "  make stop      Stop the Docker stack"
 	@echo "  make restart   Restart the Docker stack (stop + start)"
 	@echo "  make rebuild   Rebuild image (use s=<service> for single service)"
+	@echo "  make clean     Remove dangling/untagged images (<none>)"
 	@echo "  make logs      Tail logs from all containers"
 	@echo "  make status    Show container status"
 	@echo ""
@@ -36,6 +37,10 @@ rebuild:
 
 logs:
 	$(COMPOSE) logs -f
+
+clean:
+	@echo "Removing dangling images..."
+	docker image prune -f
 
 status:
 	$(COMPOSE) ps
