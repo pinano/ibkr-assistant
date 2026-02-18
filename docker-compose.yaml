@@ -77,11 +77,12 @@ services:
       - /etc/localtime:/etc/localtime:ro
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.${PROJECT_ID}-api.rule=Host(`${DOMAIN}`)"
-      - "traefik.http.routers.${PROJECT_ID}-api.entrypoints=websecure"
-      - "traefik.http.routers.${PROJECT_ID}-api.tls=true"
-      - "traefik.http.routers.${PROJECT_ID}-api.tls.certresolver=${CERT_RESOLVER}"
+      - "traefik.docker.network=traefik"
       - "traefik.http.services.${PROJECT_ID}-api.loadbalancer.server.port=8000"
+      #- "traefik.http.routers.${PROJECT_ID}-api.rule=Host(`${DOMAIN}`)"
+      #- "traefik.http.routers.${PROJECT_ID}-api.entrypoints=websecure"
+      #- "traefik.http.routers.${PROJECT_ID}-api.tls=true"
+      #- "traefik.http.routers.${PROJECT_ID}-api.tls.certresolver=${CERT_RESOLVER}"
 
   ibkr-bot:
     image: ibkr-app:latest
