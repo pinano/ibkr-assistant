@@ -39,7 +39,6 @@ scheduler = AsyncIOScheduler()
 monitor = Monitor(SessionLocal)
 
 
-
 async def notify_admins(text: str, parse_mode: str = "Markdown"):
     for chat_id in settings.allowed_ids_list:
         try:
@@ -51,17 +50,18 @@ API_HEADERS = {"X-API-Key": settings.API_KEY}
 
 # Constants
 EMOJI_MAP = {
-    "EUR": "💶", 
-    "USD": "💵", 
-    "GBP": "💷", 
-    "CHF": "🇨🇭", 
+    "EUR": "💶",
+    "USD": "💵",
+    "GBP": "💷",
+    "CHF": "🇨🇭",
     "SEK": "🇸🇪"
 }
+
 
 async def check_and_archive(force_insert: bool = False):
     """
     Monitoring check that fetches current balances and detects cash changes.
-    
+
     Args:
         force_insert: If True, always insert a record to DB (used for periodic snapshots).
                      If False, only insert when cash balance changes are detected.
@@ -75,9 +75,9 @@ async def check_and_archive(force_insert: bool = False):
             if r_sum.status_code != 200:
                 logger.warning(f"Failed to fetch summary: {r_sum.status_code}")
                 return
-            
+
             summary = r_sum.json()
-            
+
             # 2. Fetch Currencies
             r_curr = await client.get(f"{settings.WEB_SERVICE_URL}/account/currencies", headers=API_HEADERS)
             currencies = r_curr.json() if r_curr.status_code == 200 else []
@@ -87,13 +87,14 @@ async def check_and_archive(force_insert: bool = False):
             try:
                 # Map currencies for quick lookup
                 curr_map = {c['currency']: c['amount'] for c in currencies}
-                
+
                 # Get previous cash balance for change detection
-                last_record = session.query(CashBalance).order_by(CashBalance.date.desc()).first()
-                
+                last_record = session.query(CashBalance).order_by(
+                    CashBalance.date.desc()).first()
+
                 # Create new record (but don't add to session yet)
                 new_record = CashBalance(
-                    nav=summary['NetLiquidation'], 
+                    nav=summary['NetLiquidation'],
                     stock=summary['StockMarketValue'],
                     pnl=summary['UnrealizedPnL'],
                     base=summary['TotalCashValue'],
@@ -107,7 +108,7 @@ async def check_and_archive(force_insert: bool = False):
                     excessLiq=summary['ExcessLiquidity'],
                     maintMargin=summary['FullMaintMargin']
                 )
-                
+
                 # Check for alerts using the previous record
                 alerts = []
                 cash_changed = False
@@ -115,64 +116,68 @@ async def check_and_archive(force_insert: bool = False):
                     for curr in ['eur', 'usd', 'gbp']:
                         old_val = float(getattr(last_record, curr) or 0.0)
                         new_val = float(getattr(new_record, curr) or 0.0)
-                        
+
                         if new_val != old_val:
                             cash_changed = True
                             diff = new_val - old_val
                             sign = "+" if diff > 0 else "-"
                             abs_diff = abs(diff)
-                            
+
                             # Emoji mapping
                             curr_upper = curr.upper()
                             emoji = EMOJI_MAP.get(curr_upper, "💰")
-                            
+
                             alert = (
                                 f"<code>{curr_upper} {emoji} {diff:+.4f}</code>\n"
                                 f"<code>{old_val:.4f} {sign} {abs_diff:.4f} = {new_val:.4f}</code>"
                             )
                             alerts.append(alert)
-                
+
                 # Only insert to DB if:
                 # 1. Cash balance has changed, OR
                 # 2. force_insert is True (periodic snapshot)
                 should_insert = cash_changed or force_insert
-                
+
                 if should_insert:
                     session.add(new_record)
                     session.commit()
                     if cash_changed:
-                        logger.info("DB record inserted due to cash balance change")
+                        logger.info(
+                            "DB record inserted due to cash balance change")
                     else:
                         logger.info("DB record inserted (periodic snapshot)")
                 else:
                     logger.debug("No DB insert - no cash changes detected")
-                
+
                 if alerts:
                     await notify_admins(
                         "💰 <b>Cash balance change:</b>\n" + "\n".join(alerts),
                         parse_mode="HTML"
                     )
-                    
+
             except Exception as e:
                 logger.error(f"DB/Logic Error: {e}")
                 session.rollback()
             finally:
                 session.close()
 
-    except Exception as e: 
+    except Exception as e:
         logger.error(f"Monitoring Job Error: {e}")
+
 
 @dp.message(Command("nav", ignore_case=True))
 async def cmd_nav(m: types.Message):
-    if m.from_user.id not in settings.allowed_ids_list: return
-    
+    if m.from_user.id not in settings.allowed_ids_list:
+        return
+
     async with httpx.AsyncClient(timeout=30.0) as client:
         try:
             r = await client.get(f"{settings.WEB_SERVICE_URL}/account/summary", headers=API_HEADERS)
             r.raise_for_status()
             d = r.json()
-            
-            # Format with entire lines in inline code (monospace without blue box)
+
+            # Format with entire lines in inline code (monospace without blue
+            # box)
             msg = f"<code>💰 NAV:      {d['NetLiquidation']:>+12.2f}</code>\n"
             msg += f"<code>📈 Stock:    {d['StockMarketValue']:>+12.2f}</code>\n"
             msg += f"<code>📊 Pnl:      {d['UnrealizedPnL']:>+12.2f}</code>\n"
@@ -190,7 +195,6 @@ async def cmd_nav(m: types.Message):
             msg += f"<code>💧 exLiq:    {d['ExcessLiquidity']:>12.2f}</code>\n"
             msg += f"<code>🧱 margin:   {d['FullMaintMargin']:>12.2f}</code>"
 
-            
             await m.answer(msg, parse_mode="HTML")
         except httpx.HTTPStatusError as e:
             err_detail = e.response.text or str(e)
@@ -201,44 +205,49 @@ async def cmd_nav(m: types.Message):
             msg = str(e) or repr(e)
             await m.answer(f"❌ Error: {msg}")
 
+
 @dp.message(Command("pos", ignore_case=True))
 async def cmd_pos(m: types.Message):
-    if m.from_user.id not in settings.allowed_ids_list: return
-    
+    if m.from_user.id not in settings.allowed_ids_list:
+        return
+
     async with httpx.AsyncClient(timeout=30.0) as client:
         try:
             r = await client.get(f"{settings.WEB_SERVICE_URL}/account/positions", headers=API_HEADERS)
             r.raise_for_status()
             positions = r.json()
-            
+
             if not positions:
                 await m.answer("📭 No open positions.")
                 return
 
             # Separate stocks and options, sort alphabetically
-            stocks = sorted([p for p in positions if p.get('secType') != 'OPT'], key=lambda x: x['symbol'])
-            options = sorted([p for p in positions if p.get('secType') == 'OPT'], key=lambda x: x['symbol'])
-            
+            stocks = sorted([p for p in positions if p.get(
+                'secType') != 'OPT'], key=lambda x: x['symbol'])
+            options = sorted([p for p in positions if p.get(
+                'secType') == 'OPT'], key=lambda x: x['symbol'])
+
             # Stocks table (8-char symbol width)
             if stocks:
                 header = "Symbol  | Pos.  | Avg\n"
                 header += "--------|-------|-------------\n"
-                
+
                 rows = []
                 for p in stocks:
                     sym = str(p['symbol']).ljust(8)
                     qty = str(p['qty']).ljust(6)
                     cost = f"{p['cost']:.4f}"
                     rows.append(f"{sym}| {qty}| {cost}")
-                
-                msg = "� *Stocks*\n\n```\n" + header + "\n".join(rows) + "\n```"
+
+                msg = "� *Stocks*\n\n```\n" + \
+                    header + "\n".join(rows) + "\n```"
                 await m.answer(msg, parse_mode="Markdown")
-            
+
             # Options table (20-char symbol width, spaces removed)
             if options:
                 header = "Symbol              | Pos.  | Avg\n"
                 header += "--------------------|-------|-------------\n"
-                
+
                 rows = []
                 for p in options:
                     # Remove spaces from option symbols for compact display
@@ -246,10 +255,11 @@ async def cmd_pos(m: types.Message):
                     qty = str(p['qty']).ljust(6)
                     cost = f"{p['cost']:.4f}"
                     rows.append(f"{sym}| {qty}| {cost}")
-                
-                msg = "📋 *Options*\n\n```\n" + header + "\n".join(rows) + "\n```"
+
+                msg = "📋 *Options*\n\n```\n" + \
+                    header + "\n".join(rows) + "\n```"
                 await m.answer(msg, parse_mode="Markdown")
-            
+
         except httpx.HTTPStatusError as e:
             err_detail = e.response.text or str(e)
             logger.error(f"HTTP Error in /pos: {err_detail}")
@@ -259,38 +269,45 @@ async def cmd_pos(m: types.Message):
             msg = str(e) or repr(e)
             await m.answer(f"❌ Error: {msg}")
 
+
 @dp.message(Command("options", ignore_case=True))
 async def cmd_options(m: types.Message):
-    if m.from_user.id not in settings.allowed_ids_list: return
-    
+    if m.from_user.id not in settings.allowed_ids_list:
+        return
+
     async with httpx.AsyncClient(timeout=30.0) as client:
         try:
             r = await client.get(f"{settings.WEB_SERVICE_URL}/account/positions", headers=API_HEADERS)
             r.raise_for_status()
             positions = r.json()
-            
+
             # Filter for options
             options = [p for p in positions if p.get('secType') == 'OPT']
-            
+
             if not options:
                 await m.answer("📭 No open option positions.")
                 return
 
             # Sort by expiry (ascending), then underlying symbol
-            options.sort(key=lambda x: (x.get('expiry') or "", x.get('underlying') or ""))
+            options.sort(
+                key=lambda x: (
+                    x.get('expiry') or "",
+                    x.get('underlying') or ""))
 
             builder = InlineKeyboardBuilder()
-            
+
             last_expiry = None
             for opt in options:
                 curr_expiry = opt.get('expiry')
                 # Format expiry for readability if it's YYYYMMDD
-                if curr_expiry and len(curr_expiry) == 8 and curr_expiry.isdigit():
+                if curr_expiry and len(
+                        curr_expiry) == 8 and curr_expiry.isdigit():
                     formatted_expiry = f"{curr_expiry[0:4]}-{curr_expiry[4:6]}-{curr_expiry[6:8]}"
                 else:
                     formatted_expiry = curr_expiry or "Unknown"
 
-                # Add a header button (not clickable or for info) if expiry changes
+                # Add a header button (not clickable or for info) if expiry
+                # changes
                 if formatted_expiry != last_expiry:
                     builder.row(types.InlineKeyboardButton(
                         text=f"📅 {formatted_expiry}",
@@ -301,19 +318,20 @@ async def cmd_options(m: types.Message):
                 # Format Label: ASTS P 55 2026-01-09
                 underlying = opt.get('underlying', "??")
                 right = opt.get('right', "?")
-                strike = f"{opt.get('strike', 0):.0f}" if float(opt.get('strike', 0)).is_integer() else f"{opt.get('strike', 0)}"
-                
+                strike_val = opt.get('strike', 0)
+                strike = f"{strike_val:.0f}" if float(strike_val).is_integer() else f"{strike_val}"
+
                 label = f"{underlying} {right} {strike} {formatted_expiry}"
-                
+
                 builder.row(types.InlineKeyboardButton(
                     text=f"{label} ({opt['qty']})",
                     callback_data=f"opt:{opt.get('underlying','')}|{opt.get('expiry','')}|{opt.get('strike',0)}|{opt.get('right','')}|{opt.get('conId',0)}"
                 ))
-            
-            await m.answer("📑 *Open Option Positions*", 
-                           reply_markup=builder.as_markup(), 
+
+            await m.answer("📑 *Open Option Positions*",
+                           reply_markup=builder.as_markup(),
                            parse_mode="Markdown")
-                           
+
         except httpx.HTTPStatusError as e:
             err_detail = e.response.text or str(e)
             logger.error(f"HTTP Error in /options: {err_detail}")
@@ -323,9 +341,11 @@ async def cmd_options(m: types.Message):
             msg = str(e) or repr(e)
             await m.answer(f"❌ Error: {msg}")
 
+
 @dp.callback_query(F.data == "noop")
 async def process_noop(callback: types.CallbackQuery):
     await callback.answer()
+
 
 @dp.callback_query(F.data.startswith("opt:"))
 async def process_opt_details(callback: types.CallbackQuery):
@@ -339,22 +359,27 @@ async def process_opt_details(callback: types.CallbackQuery):
         await callback.message.answer("❌ Invalid option data in callback.")
         await callback.answer()
         return
-    
+
     async with httpx.AsyncClient(timeout=30.0) as client:
         try:
             r = await client.get(
                 f"{settings.WEB_SERVICE_URL}/option/greeks",
-                params={"underlying": underlying, "expiry": expiry, "strike": strike, "right": right, "conId": con_id},
+                params={
+                    "underlying": underlying,
+                    "expiry": expiry,
+                    "strike": strike,
+                    "right": right,
+                    "conId": con_id},
                 headers=API_HEADERS
             )
             r.raise_for_status()
             d = r.json()
-            
+
             # Format display label
             strike_fmt = f"{strike:.0f}" if strike == int(strike) else f"{strike}"
             exp_fmt = f"{expiry[0:4]}-{expiry[4:6]}-{expiry[6:8]}" if len(expiry) == 8 else expiry
             display = f"{underlying} {right} {strike_fmt} {exp_fmt}"
-            
+
             msg = (
                 f"📊 *Option Details: {display}*\n\n"
                 f"🧮 *Greeks:*\n"
@@ -363,7 +388,7 @@ async def process_opt_details(callback: types.CallbackQuery):
                 f"• ν Vega: `{d['vega']:.4f}`\n"
                 f"• θ Theta: `{d['theta']:.4f}`\n\n"
                 f"📈 *Market Data:*\n"
-                f"• IV: `{d['implied_vol']*100:.2f}%`\n"
+                f"• IV: `{d['implied_vol'] * 100:.2f}%`\n"
                 f"• Underl. Price: `{d['underlying_price']:.2f}`\n"
                 f"• Volume: `{d['volume']}`\n"
                 f"• Open Interest: `{d['open_interest']}`\n\n"
@@ -371,10 +396,10 @@ async def process_opt_details(callback: types.CallbackQuery):
                 f"• Price: `{d['last_price']:.2f}`\n"
                 f"• Date: `{d['last_date'] or 'N/A'}`"
             )
-            
+
             await callback.message.answer(msg, parse_mode="Markdown")
             await callback.answer()
-            
+
         except httpx.HTTPStatusError as e:
             err_detail = e.response.text or str(e)
             logger.error(f"HTTP Error in /options callback: {err_detail}")
@@ -387,11 +412,11 @@ async def process_opt_details(callback: types.CallbackQuery):
             await callback.answer()
 
 
-
 @dp.message(Command("max", ignore_case=True))
 async def cmd_max(m: types.Message):
-    if m.from_user.id not in settings.allowed_ids_list: return
-    
+    if m.from_user.id not in settings.allowed_ids_list:
+        return
+
     async with httpx.AsyncClient(timeout=30) as client:
         try:
             # 1. Fetch Real-time Summary
@@ -399,26 +424,29 @@ async def cmd_max(m: types.Message):
             r.raise_for_status()
             realtime_data = r.json()
             curr_val = float(realtime_data.get('NetLiquidation', 0))
-            
+
             # 2. Get Max NAV from DB
             session = SessionLocal()
             try:
-                max_rec = session.query(CashBalance).order_by(CashBalance.nav.desc()).first()
+                max_rec = session.query(CashBalance).order_by(
+                    CashBalance.nav.desc()).first()
                 if not max_rec:
                     await m.answer("📭 No historical data available in database.")
                     return
 
                 max_val = float(max_rec.nav or 0)
-                
-                # If current real-time NAV is higher than historical max, use current as "new high"
+
+                # If current real-time NAV is higher than historical max, use
+                # current as "new high"
                 if curr_val > max_val:
                     max_val = curr_val
                     max_date_str = "Now (Real-time)"
                 else:
                     max_date_str = max_rec.date.strftime("%Y-%m-%d %H:%M:%S")
 
-                drawdown = ((curr_val - max_val) / max_val * 100) if max_val > 0 else 0
-                
+                drawdown = ((curr_val - max_val) / max_val *
+                            100) if max_val > 0 else 0
+
                 msg = (
                     f"🏆 *All Time High*\n"
                     f"💰 NAV: `{max_val:.2f}`\n"
@@ -430,7 +458,7 @@ async def cmd_max(m: types.Message):
                 await m.answer(msg, parse_mode="Markdown")
             finally:
                 session.close()
-                
+
         except httpx.HTTPStatusError as e:
             err_detail = e.response.text or str(e)
             logger.error(f"HTTP Error in /max: {err_detail}")
@@ -440,10 +468,12 @@ async def cmd_max(m: types.Message):
             msg = str(e) or repr(e)
             await m.answer(f"❌ Error: {msg}")
 
+
 @dp.message(Command("today", ignore_case=True))
 async def cmd_today(m: types.Message):
-    if m.from_user.id not in settings.allowed_ids_list: return
-    
+    if m.from_user.id not in settings.allowed_ids_list:
+        return
+
     async with httpx.AsyncClient(timeout=30) as client:
         try:
             # 1. Fetch Real-time Summary
@@ -451,16 +481,20 @@ async def cmd_today(m: types.Message):
             r.raise_for_status()
             realtime_data = r.json()
             curr_val = float(realtime_data.get('NetLiquidation', 0))
-            
+
             # 2. Query today's min/max from DB
             session = SessionLocal()
             try:
                 today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
-                
+
                 # Get records for min and max today
-                min_rec = session.query(CashBalance).filter(CashBalance.date >= today_start).order_by(CashBalance.nav.asc()).first()
-                max_rec = session.query(CashBalance).filter(CashBalance.date >= today_start).order_by(CashBalance.nav.desc()).first()
-                
+                min_rec = session.query(CashBalance).filter(
+                    CashBalance.date >= today_start).order_by(
+                    CashBalance.nav.asc()).first()
+                max_rec = session.query(CashBalance).filter(
+                    CashBalance.date >= today_start).order_by(
+                    CashBalance.nav.desc()).first()
+
                 if not min_rec:
                     msg = (
                         f"📅 *Daily NAV Range*\n"
@@ -472,18 +506,19 @@ async def cmd_today(m: types.Message):
 
                 min_val = float(min_rec.nav)
                 min_time = min_rec.date.strftime("%H:%M")
-                
+
                 max_val = float(max_rec.nav)
                 max_time = max_rec.date.strftime("%H:%M")
-                
-                # Adjust with current value if it's more extreme than what's in DB today
+
+                # Adjust with current value if it's more extreme than what's in
+                # DB today
                 if curr_val < min_val:
                     min_val = curr_val
                     min_time = f"{datetime.now().strftime('%H:%M')} (Now)"
                 if curr_val > max_val:
                     max_val = curr_val
                     max_time = f"{datetime.now().strftime('%H:%M')} (Now)"
-                
+
                 msg = (
                     f"📅 *Daily NAV Range*\n"
                     f"🔹 Min: `{min_val:.2f}` (at {min_time})\n"
@@ -493,16 +528,18 @@ async def cmd_today(m: types.Message):
                 await m.answer(msg, parse_mode="Markdown")
             finally:
                 session.close()
-                
+
         except Exception as e:
             logger.error(f"Error in cmd_today: {e}")
             msg = str(e) or repr(e)
             await m.answer(f"❌ Error: {msg}")
 
+
 @dp.message(Command("year", ignore_case=True))
 async def cmd_year(m: types.Message):
-    if m.from_user.id not in settings.allowed_ids_list: return
-    
+    if m.from_user.id not in settings.allowed_ids_list:
+        return
+
     args = m.text.split()
     target_year = datetime.now().year
     if len(args) > 1:
@@ -523,28 +560,42 @@ async def cmd_year(m: types.Message):
                     curr_val = float(realtime_data.get('NetLiquidation', 0))
             except Exception as e:
                 logger.warning(f"Could not fetch real-time NAV: {e}")
-            
+
             # 2. Query year data from DB
             session = SessionLocal()
             try:
                 year_start = datetime(target_year, 1, 1)
                 year_end = datetime(target_year, 12, 31, 23, 59, 59)
-                
-                # Period Start
-                first_rec = session.query(CashBalance).filter(CashBalance.date >= year_start, CashBalance.date <= year_end).order_by(CashBalance.date.asc()).first()
-                # Period End
-                last_db_rec = session.query(CashBalance).filter(CashBalance.date >= year_start, CashBalance.date <= year_end).order_by(CashBalance.date.desc()).first()
-                # Min/Max in DB
-                min_rec = session.query(CashBalance).filter(CashBalance.date >= year_start, CashBalance.date <= year_end).order_by(CashBalance.nav.asc()).first()
-                max_rec = session.query(CashBalance).filter(CashBalance.date >= year_start, CashBalance.date <= year_end).order_by(CashBalance.nav.desc()).first()
 
-                if not first_rec and (curr_val is None or target_year != datetime.now().year):
+                # Period Start
+                first_rec = session.query(CashBalance).filter(
+                    CashBalance.date >= year_start,
+                    CashBalance.date <= year_end).order_by(
+                    CashBalance.date.asc()).first()
+                # Period End
+                last_db_rec = session.query(CashBalance).filter(
+                    CashBalance.date >= year_start,
+                    CashBalance.date <= year_end).order_by(
+                    CashBalance.date.desc()).first()
+                # Min/Max in DB
+                min_rec = session.query(CashBalance).filter(
+                    CashBalance.date >= year_start,
+                    CashBalance.date <= year_end).order_by(
+                    CashBalance.nav.asc()).first()
+                max_rec = session.query(CashBalance).filter(
+                    CashBalance.date >= year_start,
+                    CashBalance.date <= year_end).order_by(
+                    CashBalance.nav.desc()).first()
+
+                if not first_rec and (
+                        curr_val is None or target_year != datetime.now().year):
                     await m.answer(f"📭 No records found for year {target_year}.")
                     return
 
                 # Calculate Start
                 start_nav = float(first_rec.nav) if first_rec else curr_val
-                start_date = first_rec.date.strftime("%Y-%m-%d") if first_rec else "Now"
+                start_date = first_rec.date.strftime(
+                    "%Y-%m-%d") if first_rec else "Now"
 
                 # Calculate End
                 is_now = False
@@ -553,17 +604,22 @@ async def cmd_year(m: types.Message):
                     end_date = "Now"
                     is_now = True
                 else:
-                    end_nav = float(last_db_rec.nav) if last_db_rec else start_nav
-                    end_date = last_db_rec.date.strftime("%Y-%m-%d") if last_db_rec else start_date
+                    end_nav = float(
+                        last_db_rec.nav) if last_db_rec else start_nav
+                    end_date = last_db_rec.date.strftime(
+                        "%Y-%m-%d") if last_db_rec else start_date
 
-                period_var = ((end_nav - start_nav) / start_nav * 100) if start_nav else 0
+                period_var = ((end_nav - start_nav) /
+                              start_nav * 100) if start_nav else 0
 
                 # Calculate Min/Max (including current if applicable)
                 min_val = float(min_rec.nav) if min_rec else curr_val
-                min_date = min_rec.date.strftime("%Y-%m-%d") if min_rec else "Now"
-                
+                min_date = min_rec.date.strftime(
+                    "%Y-%m-%d") if min_rec else "Now"
+
                 max_val = float(max_rec.nav) if max_rec else curr_val
-                max_date = max_rec.date.strftime("%Y-%m-%d") if max_rec else "Now"
+                max_date = max_rec.date.strftime(
+                    "%Y-%m-%d") if max_rec else "Now"
 
                 if target_year == datetime.now().year and curr_val is not None:
                     if curr_val < min_val:
@@ -573,7 +629,8 @@ async def cmd_year(m: types.Message):
                         max_val = curr_val
                         max_date = "Now"
 
-                range_var = ((max_val - min_val) / min_val * 100) if min_val else 0
+                range_var = (
+                    (max_val - min_val) / min_val * 100) if min_val else 0
 
                 msg = (
                     f"📅 *NAV Analysis for {target_year}*\n\n"
@@ -582,7 +639,7 @@ async def cmd_year(m: types.Message):
                     f"• End:   `{end_nav:.2f}` ({end_date}{' - Act' if is_now else ''})\n"
                     f"• Var:   `{period_var:+.2f}%`"
                 )
-                
+
                 msg += "\n\n-------------------\n\n"
 
                 msg += (
@@ -591,20 +648,22 @@ async def cmd_year(m: types.Message):
                     f"• Max:   `{max_val:.2f}` ({max_date})\n"
                     f"• Var:   `{range_var:+.2f}%`"
                 )
-                
+
                 await m.answer(msg, parse_mode="Markdown")
             finally:
                 session.close()
-                
+
         except Exception as e:
             logger.error(f"Error in cmd_year: {e}", exc_info=True)
             msg = str(e) or repr(e)
             await m.answer(f"❌ Error: {msg}")
 
+
 @dp.message(Command("help", ignore_case=True))
 async def cmd_help(m: types.Message):
-    if m.from_user.id not in settings.allowed_ids_list: return
-    
+    if m.from_user.id not in settings.allowed_ids_list:
+        return
+
     help_text = (
         "🤖 *IBKR Bot Commands:*\n\n"
         "💰 /nav - Show current NAV and Cushion\n"
@@ -625,24 +684,26 @@ async def cmd_help(m: types.Message):
 
     await m.answer(help_text, parse_mode="Markdown")
 
+
 @dp.message(Command("orders", ignore_case=True))
 async def cmd_orders(m: types.Message):
-    if m.from_user.id not in settings.allowed_ids_list: return
-    
+    if m.from_user.id not in settings.allowed_ids_list:
+        return
+
     async with httpx.AsyncClient(timeout=30.0) as client:
         try:
             r = await client.get(f"{settings.WEB_SERVICE_URL}/account/orders", headers=API_HEADERS)
             r.raise_for_status()
             orders = r.json()
-            
+
             if not orders:
                 await m.answer("📭 No active orders.")
                 return
 
             msg = "📋 *Active Orders*:\n"
-            for o in orders[:15]: # Limit to 15
+            for o in orders[:15]:  # Limit to 15
                 msg += f"• `{o['action']} {o['totalQuantity']} {o['symbol']} @ {o['lmtPrice'] or 'MKT'}` ({o['status']})\n"
-            
+
             await m.answer(msg, parse_mode="Markdown")
         except httpx.HTTPStatusError as e:
             err_detail = e.response.text or str(e)
@@ -653,16 +714,18 @@ async def cmd_orders(m: types.Message):
             msg = str(e) or repr(e)
             await m.answer(f"❌ Error: {msg}")
 
+
 @dp.message(Command("trades", ignore_case=True))
 async def cmd_trades(m: types.Message):
-    if m.from_user.id not in settings.allowed_ids_list: return
-    
+    if m.from_user.id not in settings.allowed_ids_list:
+        return
+
     async with httpx.AsyncClient(timeout=30.0) as client:
         try:
             r = await client.get(f"{settings.WEB_SERVICE_URL}/account/trades", headers=API_HEADERS)
             r.raise_for_status()
             trades = r.json()
-            
+
             if not trades:
                 await m.answer("📭 No trades executed today.")
                 return
@@ -670,9 +733,10 @@ async def cmd_trades(m: types.Message):
             msg = "🤝 *Recent Trades*:\n"
             for t in trades[:15]:
                 # 2025-12-30T10:00:00 -> 10:00:00
-                time_str = t['time'].split('T')[1].split('.')[0] if 'T' in t['time'] else t['time']
+                time_str = t['time'].split('T')[1].split(
+                    '.')[0] if 'T' in t['time'] else t['time']
                 msg += f"• `{time_str}`: {t['side']} `{t['shares']}` *{t['symbol']}* @ `{t['price']}`\n"
-            
+
             await m.answer(msg, parse_mode="Markdown")
         except httpx.HTTPStatusError as e:
             err_detail = e.response.text or str(e)
@@ -683,36 +747,39 @@ async def cmd_trades(m: types.Message):
             msg = str(e) or repr(e)
             await m.answer(f"❌ Error: {msg}")
 
+
 @dp.message(Command("quote", ignore_case=True))
 async def cmd_quote(m: types.Message):
-    if m.from_user.id not in settings.allowed_ids_list: return
-    
+    if m.from_user.id not in settings.allowed_ids_list:
+        return
+
     args = m.text.split()
     if len(args) < 2:
         await m.answer("ℹ️ Usage: `/quote <SYMBOL>` (e.g. `/quote SPY`)", parse_mode="Markdown")
         return
-    
+
     symbol = args[1].upper()
-    
+
     msg = await m.answer(f"🔍 Getting quote for {symbol}...")
-    
+
     async with httpx.AsyncClient(timeout=30.0) as client:
         try:
             r = await client.get(f"{settings.WEB_SERVICE_URL}/market/snapshot/{symbol}", headers=API_HEADERS)
             r.raise_for_status()
             data = r.json()
-            
+
             # Format output
             # Symbol: SPY
             # Price: 420.50
             # Bid/Ask: 420.40 / 420.60
-            
+
             out = f"📈 *Quote: {data['symbol']}*\n\n"
             out += f"💰 Price: `{data['price']:.2f}`\n"
             if data.get('bid') and data.get('ask'):
                 out += f"↔️ Bid/Ask: `{data['bid']:.2f} / {data['ask']:.2f}`\n"
-            
-            # Format timestamp: 2025-12-30T16:26:52.882122Z -> 2025-12-30 16:26:52
+
+            # Format timestamp: 2025-12-30T16:26:52.882122Z -> 2025-12-30
+            # 16:26:52
             ts_str = data['timestamp']
             if 'T' in ts_str:
                 date_part, time_part = ts_str.split('T')
@@ -720,9 +787,9 @@ async def cmd_quote(m: types.Message):
                 ts_formatted = f"{date_part} {time_part}"
             else:
                 ts_formatted = ts_str
-                
+
             out += f"⏱ `{ts_formatted}`"
-            
+
             await msg.edit_text(out, parse_mode="Markdown")
         except httpx.HTTPStatusError as e:
             err_detail = e.response.text or str(e)
@@ -733,29 +800,31 @@ async def cmd_quote(m: types.Message):
             txt = str(e) or repr(e)
             await msg.edit_text(f"❌ Error: {txt}")
 
+
 @dp.message(Command("contract", ignore_case=True))
 async def cmd_contract(m: types.Message):
-    if m.from_user.id not in settings.allowed_ids_list: return
-    
+    if m.from_user.id not in settings.allowed_ids_list:
+        return
+
     args = m.text.split()
     if len(args) < 2:
         await m.answer("ℹ️ Usage: `/contract <SYMBOL>`", parse_mode="Markdown")
         return
-    
+
     symbol = args[1].upper()
-    
+
     async with httpx.AsyncClient(timeout=30.0) as client:
         try:
             r = await client.get(f"{settings.WEB_SERVICE_URL}/contract/search?symbol={symbol}", headers=API_HEADERS)
             r.raise_for_status()
             details = r.json()
-            
+
             if not details:
                 await m.answer(f"❌ No contract found for {symbol}.")
                 return
 
             out = f"📄 *Contract Details ({len(details)})*:\n\n"
-            for d in details[:3]: # Limit to 3 detailed views
+            for d in details[:3]:  # Limit to 3 detailed views
                 out += f"🔹 *{d['symbol']}* ({d['secType']})\n"
                 out += f"   • Name: {d['longName']}\n"
                 out += f"   • ID: `{d['conId']}` | Exch: {d['exchange']}\n"
@@ -763,7 +832,6 @@ async def cmd_contract(m: types.Message):
                     out += f"   • ISIN: `{d['isin']}`\n"
                 out += "\n"
 
-            
             await m.answer(out, parse_mode="Markdown")
         except httpx.HTTPStatusError as e:
             err_detail = e.response.text or str(e)
@@ -774,24 +842,26 @@ async def cmd_contract(m: types.Message):
             msg = str(e) or repr(e)
             await m.answer(f"❌ Error: {msg}")
 
+
 @dp.message(Command("chain", ignore_case=True))
 async def cmd_chain(m: types.Message):
-    if m.from_user.id not in settings.allowed_ids_list: return
-    
+    if m.from_user.id not in settings.allowed_ids_list:
+        return
+
     args = m.text.split()
     if len(args) < 2:
         await m.answer("ℹ️ Usage: `/chain <SYMBOL>` (e.g. `/chain AAPL`)", parse_mode="Markdown")
         return
-    
+
     symbol = args[1].upper()
     msg = await m.answer(f"🔍 Fetching option chain for {symbol}...")
-    
+
     async with httpx.AsyncClient(timeout=30.0) as client:
         try:
             r = await client.get(f"{settings.WEB_SERVICE_URL}/options/chain/{symbol}", headers=API_HEADERS)
             r.raise_for_status()
             chains = r.json()
-            
+
             if not chains:
                 await msg.edit_text(f"❌ No option chain found for {symbol}.")
                 return
@@ -800,11 +870,11 @@ async def cmd_chain(m: types.Message):
             chain = chains[0]
             expirations = chain.get('expirations', [])
             strikes = chain.get('strikes', [])
-            
+
             # Format expiration dates (YYYYMMDD -> YYYY-MM-DD)
             def fmt_exp(exp):
                 return f"{exp[:4]}-{exp[4:6]}-{exp[6:]}"
-            
+
             # Group expirations by month for compact display
             exp_by_month = {}
             for exp in expirations[:24]:  # Limit to next 24 expirations
@@ -812,28 +882,29 @@ async def cmd_chain(m: types.Message):
                 if month_key not in exp_by_month:
                     exp_by_month[month_key] = []
                 exp_by_month[month_key].append(exp[6:])  # Just the day
-            
+
             out = f"📊 <b>Option Chain: {symbol}</b>\n"
             out += f"<code>📅 Exchange: {chain['exchange']} | Mult: {chain['multiplier']}</code>\n\n"
-            
+
             out += "<b>Expirations:</b>\n"
             for month_key in sorted(exp_by_month.keys())[:6]:  # Show 6 months
                 year = month_key[:4]
                 month = month_key[4:6]
-                days = ", ".join(exp_by_month[month_key][:8])  # Limit days per month
+                # Limit days per month
+                days = ", ".join(exp_by_month[month_key][:8])
                 out += f"<code>{year}-{month}: {days}</code>\n"
             if len(exp_by_month) > 6:
                 out += f"<code>... +{len(exp_by_month) - 6} more months</code>\n"
-            
+
             # Show strike range
             if strikes:
                 min_strike = min(strikes)
                 max_strike = max(strikes)
                 mid_idx = len(strikes) // 2
-                sample_strikes = strikes[max(0, mid_idx-3):mid_idx+4]
+                sample_strikes = strikes[max(0, mid_idx - 3):mid_idx + 4]
                 out += f"<code>Strikes: {min_strike:.0f} - {max_strike:.0f} ({len(strikes)} total)</code>\n"
                 out += f"<code>Sample: {', '.join(f'{s:.0f}' for s in sample_strikes)}</code>"
-            
+
             await msg.edit_text(out, parse_mode="HTML")
         except httpx.HTTPStatusError as e:
             err_detail = e.response.text or str(e)
@@ -846,16 +917,17 @@ async def cmd_chain(m: types.Message):
 
 # Scheduler
 
+
 async def check_token_expiry():
     if not settings.IB_FLEX_TOKEN_EXPIRY:
         return
-    
+
     try:
         # Expected format: "2026-02-18, 05:34:27 EST"
         expiry_str = settings.IB_FLEX_TOKEN_EXPIRY.split(',')[0].strip()
         expiry_date = datetime.strptime(expiry_str, "%Y-%m-%d")
         days_left = (expiry_date - datetime.now()).days
-        
+
         if 0 <= days_left <= 10:
             await notify_admins(
                 f"⚠️ *IBKR Flex Token Expiry Alert*\n\n"
@@ -863,37 +935,42 @@ async def check_token_expiry():
                 f"Please generate a new one to avoid service interruption."
             )
         elif days_left < 0:
-             await notify_admins(
+            await notify_admins(
                 f"❌ *IBKR Flex Token EXPIRED*\n\n"
                 f"Your token expired on `{expiry_str}`. Flex reports will fail until a new token is provided."
             )
     except Exception as e:
         logger.error(f"Error checking token expiry: {e}")
 
-async def scheduled_flex_report(query_id=None, report_type="Daily", retry_count=0, local_date=None):
+
+async def scheduled_flex_report(
+        query_id=None, report_type="Daily", retry_count=0, local_date=None):
     attempt_str = f" (Attempt {retry_count + 1})" if not local_date else f" (Local: {local_date})"
-    logger.info(f"Running scheduled {report_type} Flex Query Report{attempt_str}...")
+    logger.info(
+        f"Running scheduled {report_type} Flex Query Report{attempt_str}...")
     try:
         # Run blocking report generation in a thread
-        # Now returns (html, date_range_html, date_range_subject, telegram_msgs, archive_status)
+        # Now returns (html, date_range_html, date_range_subject,
+        # telegram_msgs, archive_status)
         html, date_range_html, date_range_subject, telegram_msgs, archive_status = await asyncio.to_thread(
-            FlexReporter.run_report, 
-            query_id=query_id, 
+            FlexReporter.run_report,
+            query_id=query_id,
             local_date=local_date,
             report_type=report_type
         )
-        
+
         if not date_range_html:
-            logger.warning(f"{report_type} Flex Query failed: {html}") # Log warning instead of error for retries
-            
+            # Log warning instead of error for retries
+            logger.warning(f"{report_type} Flex Query failed: {html}")
+
             # Retry only if it's a scheduled run (not local)
             if not local_date:
                 if retry_count < 10:
                     next_run = datetime.now() + timedelta(hours=1)
                     scheduler.add_job(
-                        scheduled_flex_report, 
-                        'date', 
-                        run_date=next_run, 
+                        scheduled_flex_report,
+                        'date',
+                        run_date=next_run,
                         args=[query_id, report_type, retry_count + 1]
                     )
                     logger.info(f"Rescheduled {report_type} Flex Report retry #{retry_count + 1} for {next_run}")
@@ -917,7 +994,7 @@ async def scheduled_flex_report(query_id=None, report_type="Daily", retry_count=
             subject += " (Local Re-run)"
 
         email_status = await asyncio.to_thread(FlexReporter.send_email, html, subject)
-        
+
         # Send Telegram Messages (Summary + Dividends etc)
         # Ensure date is shown first as requested
         await notify_admins(f"📅 *{report_type} Flex Query Date*: `{date_range_html}`")
@@ -926,9 +1003,10 @@ async def scheduled_flex_report(query_id=None, report_type="Daily", retry_count=
             if msg.strip():
                 # Split message into lines and wrap each in code
                 lines = msg.strip().split('\n')
-                formatted_msg = '\n'.join(f'<code>{line}</code>' for line in lines if line.strip())
+                formatted_msg = '\n'.join(
+                    f'<code>{line}</code>' for line in lines if line.strip())
                 await notify_admins(formatted_msg, parse_mode="HTML")
-        
+
         # Send simple completion status with Archiving info
         await notify_admins(
             f"📊 *{report_type} Report Generated*\nDate: {date_range_html}\nArchived: {archive_status}\nEmail: {email_status}"
@@ -939,21 +1017,23 @@ async def scheduled_flex_report(query_id=None, report_type="Daily", retry_count=
             if retry_count < 10:
                 next_run = datetime.now() + timedelta(hours=1)
                 scheduler.add_job(
-                    scheduled_flex_report, 
-                    'date', 
-                    run_date=next_run, 
+                    scheduled_flex_report,
+                    'date',
+                    run_date=next_run,
                     args=[query_id, report_type, retry_count + 1]
                 )
                 logger.info(f"Rescheduled {report_type} Flex Report retry #{retry_count + 1} (due to error) for {next_run}")
             else:
-                 await notify_admins(f"⚠️ {report_type} Flex Query System Error (Failed after 10 attempts): {e}")
+                await notify_admins(f"⚠️ {report_type} Flex Query System Error (Failed after 10 attempts): {e}")
         else:
-             await notify_admins(f"❌ Local {report_type} Flex Query Exception: {e}")
+            await notify_admins(f"❌ Local {report_type} Flex Query Exception: {e}")
+
 
 @dp.message(Command("flex", ignore_case=True))
 async def cmd_flex(m: types.Message):
-    if m.from_user.id not in settings.allowed_ids_list: return
-    
+    if m.from_user.id not in settings.allowed_ids_list:
+        return
+
     args = m.text.split()
     if len(args) > 1:
         arg = args[1].lower().strip()
@@ -961,12 +1041,12 @@ async def cmd_flex(m: types.Message):
             await m.answer("Generating Monthly Flex Query Report... ⏳")
             await scheduled_flex_report(query_id=settings.IB_FLEX_MONTHLY_QUERY_ID, report_type="Monthly")
             return
-            
+
         local_date = arg
         # Basic validation
         if not (len(local_date) == 8 and local_date.isdigit()):
-             await m.answer("❌ Invalid format. Use /flex YYYYMMDD (e.g. /flex 20251229) or /flex monthly")
-             return
+            await m.answer("❌ Invalid format. Use /flex YYYYMMDD (e.g. /flex 20251229) or /flex monthly")
+            return
         await m.answer(f"Processing local report for {local_date}.xml ... ⏳")
         await scheduled_flex_report(local_date=local_date)
     else:
@@ -975,10 +1055,12 @@ async def cmd_flex(m: types.Message):
 
 # --- Alert Commands ---
 
+
 @dp.message(Command("alert", ignore_case=True))
 async def cmd_alert(m: types.Message):
-    logger.info(f"Received /alert command from user {m.from_user.id}: {m.text}")
-    if m.from_user.id not in settings.allowed_ids_list: 
+    logger.info(
+        f"Received /alert command from user {m.from_user.id}: {m.text}")
+    if m.from_user.id not in settings.allowed_ids_list:
         logger.warning(f"Unauthorized /alert attempt from {m.from_user.id}")
         return
 
@@ -995,7 +1077,7 @@ async def cmd_alert(m: types.Message):
         return
 
     action = args[1].lower()
-    
+
     session = SessionLocal()
     try:
         if action == "list":
@@ -1003,7 +1085,7 @@ async def cmd_alert(m: types.Message):
             if not alerts:
                 await m.answer("📭 No alerts set.")
                 return
-            
+
             msg = "🚨 *Active Alerts:*\n"
             for a in alerts:
                 status = "✅" if a.triggered == 0 else "❌ (Triggered)"
@@ -1015,7 +1097,7 @@ async def cmd_alert(m: types.Message):
             if len(args) < 6:
                 await m.answer("❌ Usage: `/alert add <SYMBOL> <METRIC> <COND> <VAL>`")
                 return
-            
+
             symbol = args[2].upper()
             metric = args[3].lower()
             cond = args[4]
@@ -1028,13 +1110,24 @@ async def cmd_alert(m: types.Message):
             if cond not in ('>', '<'):
                 await m.answer("❌ Condition must be > or <.")
                 return
-            
-            valid_metrics = ['delta', 'gamma', 'vega', 'theta', 'iv', 'price', 'underlying']
+
+            valid_metrics = [
+                'delta',
+                'gamma',
+                'vega',
+                'theta',
+                'iv',
+                'price',
+                'underlying']
             if metric not in valid_metrics:
                 await m.answer(f"❌ Metric must be one of: {', '.join(valid_metrics)}")
                 return
 
-            alert = Alert(symbol=symbol, metric=metric, condition=cond, threshold=val)
+            alert = Alert(
+                symbol=symbol,
+                metric=metric,
+                condition=cond,
+                threshold=val)
             session.add(alert)
             session.commit()
             await m.answer(f"✅ Alert added: `{symbol} {metric} {cond} {val}`", parse_mode="Markdown")
@@ -1043,7 +1136,7 @@ async def cmd_alert(m: types.Message):
             if len(args) < 3:
                 await m.answer("❌ Usage: `/alert del <ID>`")
                 return
-            
+
             try:
                 a_id = int(args[2])
             except ValueError:
@@ -1054,13 +1147,13 @@ async def cmd_alert(m: types.Message):
             if not alert:
                 await m.answer(f"❌ Alert ID {a_id} not found.")
                 return
-            
+
             session.delete(alert)
             session.commit()
             await m.answer(f"🗑️ Alert {a_id} deleted.")
-        
+
         else:
-             await m.answer("❌ Unknown action. Use `add`, `list`, or `del`.")
+            await m.answer("❌ Unknown action. Use `add`, `list`, or `del`.")
 
     except Exception as e:
         logger.error(f"Error in /alert: {e}", exc_info=True)
@@ -1068,13 +1161,15 @@ async def cmd_alert(m: types.Message):
     finally:
         session.close()
 
+
 @dp.message(Command("delta", ignore_case=True))
 async def cmd_delta(m: types.Message):
     """On-demand check: show all short option positions with high delta."""
-    if m.from_user.id not in settings.allowed_ids_list: return
-    
+    if m.from_user.id not in settings.allowed_ids_list:
+        return
+
     await m.answer("Checking deltas for short positions... ⏳")
-    
+
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
             # Fetch positions
@@ -1085,17 +1180,17 @@ async def cmd_delta(m: types.Message):
             if r_pos.status_code != 200:
                 await m.answer(f"❌ Failed to fetch positions (HTTP {r_pos.status_code})")
                 return
-            
+
             positions = r_pos.json()
             short_options = [
                 p for p in positions
                 if p.get('secType') == 'OPT' and p.get('qty', 0) < 0
             ]
-            
+
             if not short_options:
                 await m.answer("✅ No short option positions found.")
                 return
-            
+
             # Fetch Greeks for each short option
             results = []
             for opt in short_options:
@@ -1119,57 +1214,60 @@ async def cmd_delta(m: types.Message):
                         delta = data.get('delta', 0.0)
                         if abs(delta) < 0.0001:
                             continue
-                        
+
                         underlying = opt.get('underlying', '??')
                         right = opt.get('right', '?')
                         strike = opt.get('strike', 0)
                         expiry = opt.get('expiry', '')
                         qty = opt.get('qty', 0)
-                        
+
                         strike_fmt = f"{strike:.0f}" if strike == int(strike) else f"{strike}"
-                        exp_fmt = f"{expiry[0:4]}-{expiry[4:6]}-{expiry[6:8]}" if len(expiry) == 8 else expiry
+                        exp_fmt = f"{expiry[0:4]}-{expiry[4:6]}-{expiry[6:8]}" if len(
+                            expiry) == 8 else expiry
                         display = f"{underlying} {right} {strike_fmt} {exp_fmt}"
-                        
+
                         results.append({
                             'display': display,
                             'delta': delta,
                             'qty': qty,
-                            'high': abs(delta) > monitor.GLOBAL_DELTA_THRESHOLD
+                            'high': abs(delta) > settings.ALERT_DELTA_THRESHOLD
                         })
                 except Exception as e:
-                    logger.debug(f"Error fetching greeks for conId={con_id}: {e}")
-            
+                    logger.debug(
+                        f"Error fetching greeks for conId={con_id}: {e}")
+
             if not results:
                 await m.answer("✅ No delta data available for short positions.")
                 return
-            
+
             # Sort by absolute delta descending
             results.sort(key=lambda x: abs(x['delta']), reverse=True)
-            
+
             # Calculate max display width for alignment
             max_display = max(len(r['display']) for r in results)
             pad = max(max_display, 18)  # minimum 18 chars
-            
+
             # Build digest message
             high_count = sum(1 for r in results if r['high'])
             header = f"📊 <b>Delta Report — {len(results)} Short Position(s)</b>\n"
             if high_count:
-                header += f"⚠️ <b>{high_count} above threshold ({monitor.GLOBAL_DELTA_THRESHOLD})</b>\n"
-            
+                header += f"⚠️ <b>{high_count} above threshold ({settings.ALERT_DELTA_THRESHOLD})</b>\n"
+
             lines = [header]
             for r in results:
                 marker = "🔴" if r['high'] else "🟢"
                 display_padded = r['display'].ljust(pad)
                 delta_str = f"{r['delta']:+.3f}".rjust(7)
                 qty_str = f"({r['qty']:.0f})".rjust(4)
+
                 lines.append(
                     f"{marker} <code>{display_padded} Δ {delta_str} {qty_str}</code>"
                 )
-            
-            lines.append(f"\n🔴 abs(Δ) &gt; {monitor.GLOBAL_DELTA_THRESHOLD}  🟢 abs(Δ) ≤ {monitor.GLOBAL_DELTA_THRESHOLD}")
-            
+
+            lines.append(f"\n🔴 abs(Δ) &gt; {settings.ALERT_DELTA_THRESHOLD}  🟢 abs(Δ) ≤ {settings.ALERT_DELTA_THRESHOLD}")
+
             await m.answer("\n".join(lines), parse_mode="HTML")
-    
+
     except Exception as e:
         logger.error(f"Error in /delta: {e}", exc_info=True)
         await m.answer(f"❌ Error: {e}")
@@ -1186,14 +1284,14 @@ async def main():
 
     # Daily Flex Query: Tue,Wed,Thu,Fri,Sat
     scheduler.add_job(
-        scheduled_flex_report, 
-        'cron', 
-        day_of_week='tue,wed,thu,fri,sat', 
-        hour=sh, 
+        scheduled_flex_report,
+        'cron',
+        day_of_week='tue,wed,thu,fri,sat',
+        hour=sh,
         minute=sm,
         args=[settings.IB_FLEX_DAILY_QUERY_ID, "Daily"]
     )
-    
+
     # Monthly Flex Query: 1st of each month at 12:00
     scheduler.add_job(
         scheduled_flex_report,
@@ -1203,17 +1301,18 @@ async def main():
         minute=0,
         args=[settings.IB_FLEX_MONTHLY_QUERY_ID, "Monthly"]
     )
-    
+
     # 2. Schedule: Daily check for token expiry at 09:00
     scheduler.add_job(check_token_expiry, 'cron', hour=9, minute=0)
-    
+
     # Calculate intervals in minutes
     check_interval_min = max(1, settings.CASH_DIFFERENCE_CHECK_INTERVAL // 60)
     db_insert_interval_min = max(1, settings.DB_INSERT_INTERVAL // 60)
 
     # 3. Schedule: Periodic DB snapshots (Fixed time, e.g. :00, :30)
     # We want these to happen EXACTLY at the interval marks
-    snap_mins = set(range(0, 60, db_insert_interval_min)) if db_insert_interval_min < 60 else {0}
+    snap_mins = set(range(0, 60, db_insert_interval_min)
+                    ) if db_insert_interval_min < 60 else {0}
     snap_cron = ",".join(map(str, sorted(snap_mins)))
 
     scheduler.add_job(
@@ -1228,22 +1327,24 @@ async def main():
     )
 
     # 4. Schedule: Cash change detection
-    # Run at check intervals BUT skip minutes where a snapshot (forced insert) creates a redundancy
-    check_mins = set(range(0, 60, check_interval_min)) if check_interval_min < 60 else {0}
+    # Run at check intervals BUT skip minutes where a snapshot (forced insert)
+    # creates a redundancy
+    check_mins = set(range(0, 60, check_interval_min)
+                     ) if check_interval_min < 60 else {0}
     effective_check_mins = check_mins - snap_mins
-    
+
     if effective_check_mins:
         check_cron = ",".join(map(str, sorted(effective_check_mins)))
         scheduler.add_job(
             check_and_archive,  # force_insert defaults to False
-            'cron', 
+            'cron',
             day_of_week='mon-fri',
             hour='7-23',
             minute=check_cron,
             max_instances=1,
             id='cash_change_check'
         )
-    
+
     # 5. Schedule: Weekend cash control points (Sat, Sun at 12:00)
     scheduler.add_job(
         check_and_archive,
@@ -1263,7 +1364,7 @@ async def main():
         seconds=settings.ALERT_CHECK_INTERVAL,
         id='alert_monitoring'
     )
-    
+
     # 7. Schedule: Greeks Cache Refresh (European Hours)
     # Mon-Fri 09:00-18:00 every 15 mins
     scheduler.add_job(
@@ -1274,15 +1375,16 @@ async def main():
         minute='*/15',
         id='greeks_cache_refresh'
     )
-    
+
     check_cron_log = check_cron if effective_check_mins else 'None (covered by snapshots)'
-    logger.info(f"Scheduler configured: Snapshots at mins={snap_cron}, Checks at mins={check_cron_log}, Weekend at 12:00")
-    
+    logger.info(
+        f"Scheduler configured: Snapshots at mins={snap_cron}, Checks at mins={check_cron_log}, Weekend at 12:00")
+
     scheduler.start()
-    
+
     # Initial checks (no forced DB inserts on startup to respect intervals)
     await check_token_expiry()
-    
+
     await dp.start_polling(bot)
 
 if __name__ == "__main__":

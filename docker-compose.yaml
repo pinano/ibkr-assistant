@@ -4,7 +4,6 @@ services:
     image: gnzsnz/ib-gateway:stable
     restart: always
     container_name: ${PROJECT_ID}-gateway
-
     environment:
       - TWS_USERID=${IB_USER}
       - TWS_PASSWORD=${IB_PASS}
@@ -26,21 +25,20 @@ services:
     image: mariadb:latest
     restart: always
     container_name: ${PROJECT_ID}-db
-
     command: --default-time-zone=${TZ}
     environment:
       TZ: ${TZ}
       MARIADB_ROOT_PASSWORD: ${DB_ROOT_PASS}
       MARIADB_DATABASE: ${DB_NAME}
       MARIADB_USER: ${DB_USER}
-      MARIADB_PASSWORD: ${DB_PASSWORD}
+      MARIADB_PASSWORD: ${DB_PASS}
     volumes:
       - /etc/localtime:/etc/localtime:ro
       - ./mariadb_data:/var/lib/mysql
     ports:
-      - "127.0.0.1:${MARIADB_HOST_PORT}:3306"
+      - "127.0.0.1:${DB_HOST_PORT}:3306"
     healthcheck:
-      test: [ "CMD", "mariadb-admin", "ping", "-h", "localhost", "-u", "${DB_USER}", "--password=${DB_PASSWORD}" ]
+      test: [ "CMD", "mariadb-admin", "ping", "-h", "localhost", "-u", "${DB_USER}", "--password=${DB_PASS}" ]
       interval: 2s
       timeout: 2s
       retries: 10
@@ -54,17 +52,16 @@ services:
     restart: always
     container_name: ${PROJECT_ID}-api
     user: "${USER_ID}:${GROUP_ID}"
-
     environment:
       - TZ=${TZ}
       - PROJECT_ID=${PROJECT_ID}
       - DB_USER=${DB_USER}
-      - DB_PASSWORD=${DB_PASSWORD}
+      - DB_PASS=${DB_PASS}
       - DB_NAME=${DB_NAME}
       - IB_PORT=${IB_PORT}
       - IB_CLIENT_ID=${IB_CLIENT_ID}
       - API_KEY=${API_KEY}
-      - DB_URL=mysql+pymysql://${DB_USER}:${DB_PASSWORD}@${PROJECT_ID}-db/${DB_NAME}
+      - DB_URL=mysql+pymysql://${DB_USER}:${DB_PASS}@${PROJECT_ID}-db/${DB_NAME}
     depends_on:
       ibkr-db:
         condition: service_healthy
@@ -74,6 +71,7 @@ services:
       - traefik
       - ibkr
     volumes:
+      - ./src:/app/src
       - /etc/localtime:/etc/localtime:ro
     labels:
       - "traefik.enable=true"
@@ -89,7 +87,6 @@ services:
     restart: always
     container_name: ${PROJECT_ID}-bot
     user: "${USER_ID}:${GROUP_ID}"
-
     command: python -m src.bot
     environment:
       - TZ=${TZ}
@@ -97,9 +94,10 @@ services:
       - TELEGRAM_TOKEN=${TG_TOKEN}
       - TELEGRAM_ALLOWED_IDS=${TG_ALLOWED_IDS}
       - API_KEY=${API_KEY}
-      - DB_URL=mysql+pymysql://${DB_USER}:${DB_PASSWORD}@${PROJECT_ID}-db/${DB_NAME}
+      - DB_URL=mysql+pymysql://${DB_USER}:${DB_PASS}@${PROJECT_ID}-db/${DB_NAME}
       - CASH_DIFFERENCE_CHECK_INTERVAL=${CASH_DIFFERENCE_CHECK_INTERVAL}
       - ALERT_CHECK_INTERVAL=${ALERT_CHECK_INTERVAL}
+      - ALERT_DELTA_THRESHOLD=${ALERT_DELTA_THRESHOLD}
       - DB_INSERT_INTERVAL=${DB_INSERT_INTERVAL}
       - IB_FLEX_TOKEN=${IB_FLEX_TOKEN}
       - IB_FLEX_DAILY_QUERY_ID=${IB_FLEX_DAILY_QUERY_ID}
@@ -113,6 +111,7 @@ services:
       - EMAIL_SMTP_USER=${EMAIL_SMTP_USER}
       - EMAIL_SMTP_PASSWORD=${EMAIL_SMTP_PASSWORD}
     volumes:
+      - ./src:/app/src
       - /etc/localtime:/etc/localtime:ro
       - ./flex_queries:/app/flex_queries
     depends_on:

@@ -1,40 +1,43 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+
 class Settings(BaseSettings):
     # Project Configuration
     PROJECT_ID: str = "ib"
-    
+
     # IBKR Connection (Required by API, optional for Bot)
     IB_PORT: int = 4003
     IB_CLIENT_ID: int = 1
-    
+
     @property
     def IB_HOST(self) -> str:
         return f"{self.PROJECT_ID}-gateway"
-    
+
     # API Security
     API_KEY: str
-    
+
     # Database (Only required by Bot)
     DB_URL: str = ""
-    
+
     # Telegram Bot (Only required by Bot)
     TELEGRAM_TOKEN: str = ""
     TELEGRAM_ALLOWED_IDS: str = ""  # Comma separated list of IDs
     CASH_DIFFERENCE_CHECK_INTERVAL: int = 300
     DB_INSERT_INTERVAL: int = 1800
     ALERT_CHECK_INTERVAL: int = 300
-    
+    ALERT_DELTA_THRESHOLD: float = 0.25
+
     @property
     def WEB_SERVICE_URL(self) -> str:
         return f"http://{self.PROJECT_ID}-api:8000"
-    
+
     @property
     def allowed_ids_list(self) -> list[int]:
         if not self.TELEGRAM_ALLOWED_IDS:
             return []
         try:
-            return [int(x.strip()) for x in self.TELEGRAM_ALLOWED_IDS.split(",") if x.strip()]
+            return [int(x.strip())
+                    for x in self.TELEGRAM_ALLOWED_IDS.split(",") if x.strip()]
         except ValueError:
             return []
 
@@ -44,7 +47,7 @@ class Settings(BaseSettings):
     IB_FLEX_MONTHLY_QUERY_ID: str = ""
     IB_FLEX_TOKEN_EXPIRY: str = ""
     IB_FLEX_SCHEDULE_TIME: str = "07:30"
-    
+
     EMAIL_SENDER: str = ""
     EMAIL_RECIPIENT: str = ""
     EMAIL_SMTP_SERVER: str = ""
@@ -56,5 +59,6 @@ class Settings(BaseSettings):
         env_file=".env",
         extra="ignore"
     )
+
 
 settings = Settings()

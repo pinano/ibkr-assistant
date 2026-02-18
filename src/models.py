@@ -6,6 +6,7 @@ from sqlalchemy.orm import declarative_base
 
 # --- Pydantic Models (API Responses) ---
 
+
 class AccountSummary(BaseModel):
     NetLiquidation: float
     AvailableMargin: float
@@ -40,9 +41,11 @@ class PositionItem(BaseModel):
     right: Optional[str] = None
     underlying: Optional[str] = None
 
+
 class CurrencyItem(BaseModel):
     currency: str
     amount: float
+
 
 class OptionChainItem(BaseModel):
     exchange: str
@@ -78,6 +81,7 @@ class OrderItem(BaseModel):
     auxPrice: Optional[float] = None
     status: str
 
+
 class TradeItem(BaseModel):
     executionId: str
     symbol: str
@@ -86,6 +90,7 @@ class TradeItem(BaseModel):
     shares: float
     price: float
     orderId: int
+
 
 class ContractDetailsItem(BaseModel):
     conId: int
@@ -106,11 +111,9 @@ class MarketSnapshot(BaseModel):
     timestamp: Optional[datetime] = None
 
 
-
-
 # --- SQLAlchemy Models (Database) ---
-
 Base = declarative_base()
+
 
 class CashBalance(Base):
     __tablename__ = 'balances'
@@ -138,16 +141,17 @@ class Alert(Base):
     metric = Column(String(20))     # delta, gamma, theta, vega, price, iv
     condition = Column(String(5))   # >, <
     threshold = Column(Float)
-    triggered = Column(Integer, default=0) # 0=Active, 1=Triggered (one-shot), 2=Recurring?
+    # 0=Active, 1=Triggered (one-shot), 2=Recurring?
+    triggered = Column(Integer, default=0)
 
 
 class OptionSnapshot(Base):
     __tablename__ = 'option_snapshots'
-    
+
     conId = Column(Integer, primary_key=True)
     symbol = Column(String(50))  # e.g. "RMS 260220 P 1860"
     updated_at = Column(DateTime, default=datetime.utcnow)
-    
+
     # Market Data
     last_price = Column(Float)
     delta = Column(Float)
@@ -156,6 +160,3 @@ class OptionSnapshot(Base):
     vega = Column(Float)
     implied_vol = Column(Float)
     underlying_price = Column(Float)
-
-
-
