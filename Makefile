@@ -11,6 +11,7 @@ help:
 	@echo "  make init      Initialize .env from .env.dist (interactive)"
 	@echo "  make start     Start the Docker stack (builds if needed)"
 	@echo "  make stop      Stop the Docker stack"
+	@echo "  make restart   Restart the Docker stack (stop + start)"
 	@echo "  make rebuild   Rebuild image (use s=<service> for single service)"
 	@echo "  make logs      Tail logs from all containers"
 	@echo "  make status    Show container status"

@@ -8,7 +8,8 @@ A robust monitoring and management stack for Interactive Brokers (IBKR). This pr
 *   **Persistent Storage**: MariaDB database to store historical account balances and portfolio performance.
 *   **Telegram Bot**:
     *   **Multi-User Security**: Configurable allow-list (`TELEGRAM_ALLOWED_IDS`) to support multiple admins.
-    *   **Real-time Alerts**: Automatically notifies about significant balance changes in EUR, USD, and GBP.
+    *   **Real-time Alerts**: Automatically notifies about significant balance changes in EUR, USD, GBP, CHF, and SEK.
+    *   **Timezone Awareness**: All bot commands respect the user's local timezone (via `TZ` env var).
     *   **Delta Monitoring**: Scheduled checks for high-delta short option positions, with consolidated digest notifications and per-contract throttling (4h cooldown).
     *   **Custom Alerts**: User-defined alerts on option Greeks, price, and IV via `/alert`.
     *   **Interactive Commands**: Check NAV, positions, options Greeks, and historical highs.
@@ -72,6 +73,7 @@ The project uses a `Makefile` for lifecycle management:
 | `make init` | Initialize `.env` from `.env.dist` (interactive wizard) |
 | `make start` | Sync `.env` with `.env.dist`, build images, and start services |
 | `make stop` | Stop and remove containers |
+| `make restart` | Restart the Docker stack (stop + start) |
 | `make rebuild` | Rebuild images from scratch and recreate all containers |
 | `make logs` | Tail logs from all containers |
 | `make status` | Show container status |
@@ -88,6 +90,7 @@ The project uses a `Makefile` for lifecycle management:
 | `/contract <SMBL>` | Search contract details (ConID, Exchange, ISIN) |
 | `/chain <SMBL>` | Option chain expirations and strikes |
 | `/options` | Interactive options dashboard — click to see Greeks (Δ, γ, θ, ν) |
+| `/option/risk` | Unified dynamic ticker lookup (supports US & International options) with consistent sign handling. |
 | `/max` | All-Time High NAV vs current drawdown |
 | `/today` | Today's NAV Min / Max / Current |
 | `/year [YYYY]` | Yearly NAV analysis (Min, Max, Var%) |
@@ -151,6 +154,7 @@ Each instance will have its own isolated database, containers, and Traefik routi
 ## 📂 Data & Archiving
 
 *   **Database**: Data is stored in `./mariadb_data` (mapped volume).
+    *   **Automated Maintenance**: Old option snapshots (>7 days) are automatically pruned daily at 04:00 AM.
 *   **Flex Queries**: XML reports are archived in `./flex_queries`.
 
 ## ⚠️ Important Notes
