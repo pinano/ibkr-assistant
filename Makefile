@@ -11,7 +11,7 @@ help:
 	@echo "  make init      Initialize .env from .env.dist (interactive)"
 	@echo "  make start     Start the Docker stack (builds if needed)"
 	@echo "  make stop      Stop the Docker stack"
-	@echo "  make rebuild   Rebuild image from scratch and recreate containers"
+	@echo "  make rebuild   Rebuild image (use s=<service> for single service)"
 	@echo "  make logs      Tail logs from all containers"
 	@echo "  make status    Show container status"
 	@echo ""
@@ -26,8 +26,8 @@ stop:
 	@bash src/stop.sh
 
 rebuild:
-	$(COMPOSE) build --no-cache
-	$(COMPOSE) up -d --force-recreate --remove-orphans
+	$(COMPOSE) build --no-cache $(s)
+	$(COMPOSE) up -d --force-recreate --remove-orphans $(s)
 
 logs:
 	$(COMPOSE) logs -f
