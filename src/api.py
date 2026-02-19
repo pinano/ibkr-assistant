@@ -427,7 +427,8 @@ async def _qualify_option_contract(
     expiry: str,
     strike: float,
     right: str,
-    currency: str = "USD"
+    currency: str = "USD",
+    exchange: str = "SMART"
 ):
     """
     Attempt to qualify an option contract using multiple strategies:
@@ -444,7 +445,8 @@ async def _qualify_option_contract(
         expiry,
         strike,
         right,
-        'SMART',
+        right,
+        exchange,
         currency=currency)
     
     try:
@@ -453,6 +455,25 @@ async def _qualify_option_contract(
             return qualified
     except Exception:
         pass
+
+    # 1b. Retry with multiplier='100' if initial failed (resolves ambiguity for EU options)
+    if not qualified or not qualified[0]:
+        try:
+            contract_100 = Option(
+                ticker,
+                expiry,
+                strike,
+                right,
+                exchange,
+                currency=currency,
+                multiplier='100'
+            )
+            qualified = await client.qualifyContractsAsync(contract_100)
+            if qualified and qualified[0]:
+                logger.info(f"Qualified option {ticker} via multiplier='100'")
+                return qualified
+        except Exception:
+            pass
 
     # 2. Try alternative currencies in parallel
     alt_currencies = [
@@ -908,8 +929,36 @@ async def get_option_risk(symbol: str):
     client = await get_ib()
     client.reqMarketDataType(4)  # Delayed-Frozen fallback
 
+    # Exchange Prefix Mapping (Google Finance / Yahoo Finance style -> IBKR)
+    # We use SMART for options as specific stock exchanges (like SBF) often don't list options directly.
+    # The currency is the key differentiator.
+    EXCHANGE_PREFIXES = {
+        "EPA": ("MONEP", "EUR"),    # Paris -> MONEP
+        "AMS": ("FTA", "EUR"),      # Amsterdam -> FTA (approx, often EUREX in practice but FTA is the code)
+        "ETR": ("DTB", "EUR"),      # Xetra -> DTB (Eurex)
+        "FRA": ("DTB", "EUR"),      # Frankfurt -> DTB
+        "LON": ("LSE", "GBP"),      # London
+        "SWX": ("EBS", "CHF"),      # SWX -> EBS (Swiss)
+        "MC":  ("MEFF", "EUR"),     # Madrid -> MEFF
+        "MCE": ("MEFF", "EUR"),     # Madrid (alternative)
+    }
+
     try:
         symbol = symbol.strip()
+        
+        # Check for explicit exchange prefix (e.g. "EPA:MC260320P00490000")
+        prefix_exchange = None
+        prefix_currency = None
+        
+        if ':' in symbol:
+            parts = symbol.split(':')
+            if len(parts) == 2:
+                prefix = parts[0].upper()
+                symbol = parts[1] # Update symbol to be the part after colon
+                
+                if prefix in EXCHANGE_PREFIXES:
+                    prefix_exchange, prefix_currency = EXCHANGE_PREFIXES[prefix]
+                    logger.info(f"Using explicit prefix {prefix} -> {prefix_exchange}, {prefix_currency}")
 
         # Detect format:
         # European format: starts with "P " or "C " (right first), e.g., "P HMI  20260220 1900 M"
@@ -923,6 +972,10 @@ async def get_option_risk(symbol: str):
         strike_val = 0.0
         right = ""
         currency = "USD"
+        
+        # If we have a prefix, prioritize its currency
+        if prefix_currency:
+            currency = prefix_currency
 
         if is_european_format:
             # European/IBKR localSymbol format: "P HMI  20260220 1900 M"
@@ -936,10 +989,14 @@ async def get_option_risk(symbol: str):
             strike_val = float(parts[3])
             
             # Parse ticker for international stocks (e.g., HMI.PA -> SBF/EUR)
-            ticker, exchange, currency = parse_symbol(raw_ticker)
+            # Only parse if we didn't get an explicit prefix
+            if not prefix_currency:
+                ticker, exchange, currency = parse_symbol(raw_ticker)
+            else:
+                ticker = raw_ticker # Use raw ticker if prefix was active
 
             # For European format options without suffix, default to EUR if not specified
-            if currency == "USD" and '.' not in raw_ticker:
+            if currency == "USD" and '.' not in raw_ticker and not prefix_currency:
                 currency = "EUR"
         else:
             # OSI Format (US options): "ASTS  260109P00065000"
@@ -950,8 +1007,12 @@ async def get_option_risk(symbol: str):
             expiry = f"20{expiry_raw[0:2]}{expiry_raw[2:4]}{expiry_raw[4:6]}"
             raw_ticker = symbol_clean[:-15].strip()
 
-            # Parse ticker for international stocks
-            ticker, exchange, currency = parse_symbol(raw_ticker)
+            if prefix_currency:
+                ticker = raw_ticker
+                # If we have a prefix, we trust the ticker is just the ticker
+            else:
+                # Parse ticker for international stocks
+                ticker, exchange, currency = parse_symbol(raw_ticker)
 
         # Build contract - try to qualify it using the robust helper
         qualified = await _qualify_option_contract(
@@ -960,7 +1021,9 @@ async def get_option_risk(symbol: str):
             expiry,
             strike_val,
             'P' if right == 'P' else 'C',
-            currency
+
+            currency,
+            prefix_exchange or "SMART"
         )
         
         if not qualified or not qualified[0]:
