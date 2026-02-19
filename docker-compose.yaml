@@ -19,11 +19,11 @@ services:
       - TZ=${TZ}
       - TIME_ZONE=${TZ}
     healthcheck:
-      test: ["CMD-SHELL", "nc -z localhost ${IB_PORT} || exit 1"]
-      interval: 10s
+      test: ["CMD-SHELL", "bash -c '< /dev/tcp/localhost/${IB_PORT}' || exit 1"]
+      interval: 15s
       timeout: 5s
-      retries: 6
-      start_period: 60s
+      retries: 12
+      start_period: 120s
     networks:
       - ibkr
 
