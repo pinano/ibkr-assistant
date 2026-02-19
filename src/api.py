@@ -576,7 +576,7 @@ async def get_option_greeks(
                     "Could not resolve conId via positions (Gateway down)")
 
         # 2. Check Cache
-        if conId:
+        if conId or snap:
             if not snap:
                 snap = db.query(OptionSnapshot).filter(
                     OptionSnapshot.conId == conId
@@ -739,25 +739,69 @@ async def get_option_greeks(
                 detail=f"Option contract not found: {underlying} {expiry} {strike} {right}")
 
         # Request market data and wait for valid Greeks
-        client.reqMktData(qualified[0], '', False, False)
+        # Retry loop for robust data fetching
+        max_retries = 3
+        best_g = None
+        best_t = None
+        
+        for attempt in range(max_retries):
+            # 1. Request data
+            client.reqMktData(qualified[0], '', False, False)
+            
+            t = None
+            g = None
+            
+            # Wait loop
+            for _ in range(50):  # Wait up to 5 seconds per attempt
+                await asyncio.sleep(0.1)
+                t = client.ticker(qualified[0])
+                if t:
+                    g = t.modelGreeks or t.bidGreeks or t.askGreeks or t.lastGreeks
+                    # Start accepting data if we have valid Greeks
+                    if _greeks_are_valid(g):
+                        break
+                    # OR if we have a price after some wait
+                    if _ >= 30 and (t.last is not None and not math.isnan(t.last)):
+                        break
+            
+            client.cancelMktData(qualified[0])
+            
+            # 2. Assess quality
+             # Check if we have valid data
+            current_g = t.modelGreeks or t.bidGreeks or t.askGreeks or t.lastGreeks if t else None
+            current_last = t.last if (t and t.last is not None and not math.isnan(t.last)) else None
+            
+            is_valid = _greeks_are_valid(current_g)
+            has_price = current_last is not None and current_last > 0
+            
+            # If valid, break early and use this data
+            if is_valid:
+                best_g = current_g
+                best_t = t
+                logger.info(f"Fetched valid Greeks on attempt {attempt+1}/{max_retries}")
+                break
+            
+            # If not valid but has price, keep as candidate but try again for Greeks
+            if has_price:
+                 if best_t is None: # Keep the first one with price if we don't have better
+                     best_t = t
+                     best_g = current_g
+            
+            # If we are here, we didn't get valid Greeks.
+            if attempt < max_retries - 1:
+                logger.info(f"Attempt {attempt+1}/{max_retries} for {display_symbol} yielded incomplete data. Retrying...")
+                await asyncio.sleep(1.0)
+            else:
+                 logger.warning(f"Failed to fetch valid Greeks for {display_symbol} after {max_retries} attempts.")
+                 # Fallback to whatever we have (best_t or current t)
+                 if best_t is None:
+                     best_t = t
+                     best_g = current_g
 
-        t = None
-        g = None
-        for _ in range(80):  # Wait up to 8 seconds for valid Greeks
-            await asyncio.sleep(0.1)
-            t = client.ticker(qualified[0])
-            if t:
-                g = t.modelGreeks or t.bidGreeks or t.askGreeks or t.lastGreeks
-                if _greeks_are_valid(g):
-                    break
-                # Accept last price only after 5s if no Greeks arrive
-                if _ >= 50 and (t.last is not None and not math.isnan(t.last)):
-                    break
+        t = best_t
+        g = best_g
 
-        client.cancelMktData(qualified[0])
-
-        if not t or not (t.modelGreeks or t.bidGreeks or t.askGreeks or t.lastGreeks or (
-                t.last is not None and not math.isnan(t.last))):
+        if not t or not (g or (t.last is not None and not math.isnan(t.last))):
             if snap:
                 logger.warning(
                     f"No live data received for {underlying}, serving STALE cache.")
@@ -777,8 +821,6 @@ async def get_option_greeks(
                 status_code=404,
                 detail="No live market data received and no cache available")
 
-        g = t.modelGreeks or t.bidGreeks or t.askGreeks or t.lastGreeks
-
         t_vol = getattr(t, 'volume', None)
         t_oi = getattr(t, 'openInterest', None)
         t_last = getattr(t, 'last', None)
@@ -788,13 +830,24 @@ async def get_option_greeks(
             """Return 0.0 if val is None or NaN."""
             return val if (val is not None and not math.isnan(val)) else 0.0
 
-        display_symbol = f"{underlying} {expiry} {strike} {right}"
-
         # Update Cache — if Greeks are valid OR if we have a valid last price
+        # Strict validity check for DB: Must have underlying price > 0 for options usually, 
+        # or at least some data.
         has_valid_greeks = _greeks_are_valid(g)
         has_valid_price = t_last is not None and not math.isnan(t_last) and t_last > 0
 
-        if qualified and qualified[0] and (has_valid_greeks or has_valid_price):
+        # Logic: We only save if we have something meaningful.
+        # If we have valid greeks, we save.
+        # If we have valid price but no greeks, we save (better than nothing).
+        
+        should_save = False
+        if qualified and qualified[0]:
+             if has_valid_greeks:
+                 should_save = True
+             elif has_valid_price:
+                 should_save = True
+        
+        if should_save:
             cid = qualified[0].conId
             # ALWAYS create a new snapshot record for history log
             snap = OptionSnapshot(conId=cid)
