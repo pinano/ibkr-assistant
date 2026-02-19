@@ -636,6 +636,40 @@ async def get_option_greeks(
                 cboe_data = await _fetch_cboe_greeks(underlying, expiry, strike, right)
                 if cboe_data:
                     logger.info(f"Fetched Greeks from CBOE for {underlying} {expiry} {strike} {right}")
+                    
+                    # CACHE CBOE DATA
+                    # We need a conId to cache. CBOE doesn't give us IBKR conId.
+                    # If we have conId from before, use it. If not, we might need to resolve it or store with conId=0?
+                    # Storing with conId=0 is problematic for retrieval if we rely on conId.
+                    # But the retrieval logic (lines 528-543) ALSO tries to find by pattern if conId is missing.
+                    # So we can save with conId=0 (or the one we have) and reliance on symbol pattern matching.
+                    
+                    try:
+                        # Create snapshot
+                        snap = OptionSnapshot(conId=conId or 0)
+                        db.add(snap)
+                        snap.symbol = cboe_data.symbol  # This usually has (CBOE) suffix from _fetch_cboe_greeks, maybe clean it?
+                        # Actually _fetch_cboe_greeks returns: f"{ticker} {expiry} {strike} {right} (CBOE)"
+                        # To be consistent with DB pattern "TICKER YYYYMMDD STRIKE RIGHT", we should use the display_symbol format used below.
+                        
+                        # Reconstruct standard display symbol for DB storage
+                        db_symbol = f"{underlying} {expiry} {strike} {right}"
+                        snap.symbol = db_symbol
+                        
+                        snap.updated_at = datetime.now()
+                        snap.delta = cboe_data.delta
+                        snap.gamma = cboe_data.gamma
+                        snap.theta = cboe_data.theta
+                        snap.vega = cboe_data.vega
+                        snap.implied_vol = cboe_data.implied_vol
+                        snap.underlying_price = cboe_data.underlying_price
+                        snap.last_price = cboe_data.last_price
+                        
+                        db.commit()
+                        logger.info(f"Cached CBOE data for {db_symbol}")
+                    except Exception as db_e:
+                        logger.error(f"Failed to cache CBOE data: {db_e}")
+                        
                     return cboe_data
             except Exception as e:
                 logger.debug(f"CBOE check failed: {e}")
