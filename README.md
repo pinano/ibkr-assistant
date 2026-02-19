@@ -6,6 +6,15 @@ A robust monitoring and management stack for Interactive Brokers (IBKR). This pr
 
 *   **IBKR REST API**: A FastAPI wrapper utilizing `ib_async` to provide endpoints for account summaries, positions, orders, trades, and option Greeks.
 *   **Persistent Storage**: MariaDB database to store historical account balances and portfolio performance.
+
+### 🔒 HTTPS & Proxies
+This project is designed to run behind a **Traefik** reverse proxy.
+The `docker-compose.yaml` includes labels to automatically expose the API:
+- **Router Rule**: `Host({container_name}.{your_traefik_domain})` (managed externally)
+- **Port**: 8000
+- **TLS**: Enabled
+
+Ensure your external Traefik instance is connected to the `traefik` network defined in `docker-compose.yaml`.
 *   **Telegram Bot**:
     *   **Multi-User Security**: Configurable allow-list (`TELEGRAM_ALLOWED_IDS`) to support multiple admins.
     *   **Real-time Alerts**: Automatically notifies about significant balance changes in EUR, USD, GBP, CHF, and SEK.
@@ -143,7 +152,7 @@ You can run multiple independent instances on the same machine (e.g., for differ
 2.  Run `make init`.
 3.  Set a unique `PROJECT_ID` (e.g., `ib2`).
 4.  Set a unique `MARIADB_HOST_PORT` (e.g., `3307`) to avoid port conflicts.
-5.  Configure unique credentials and domain.
+5.  Configure unique credentials.
 6.  Start with `make start`.
 
 Each instance will have its own isolated database, containers, and Traefik routing rules.
