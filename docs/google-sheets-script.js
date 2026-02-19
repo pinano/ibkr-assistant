@@ -319,7 +319,9 @@ function GETFXRATE(pair) {
         } catch (e) {
             return 'Error: Invalid JSON response from API';
         }
-        return data.price || 'Error: No price data available';
+        return (data.price !== null && data.price !== undefined)
+            ? data.price
+            : 'Error: No price data available';
 
     } catch (e) {
         return 'Error: ' + e.message;
