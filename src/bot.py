@@ -1138,7 +1138,7 @@ async def cmd_delta(m: types.Message):
                         qty = opt.get('qty', 0)
 
                         strike_fmt = f"{strike:.0f}" if strike == int(strike) else f"{strike}"
-                        exp_fmt = expiry
+                        exp_fmt = expiry.replace("-", "")
                         display = f"{underlying} {right} {strike_fmt} {exp_fmt}"
 
                         results.append({

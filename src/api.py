@@ -517,17 +517,22 @@ async def get_option_greeks(
         snap = None
 
         # 0. Try to resolve conId and/or snap from DB first if conId is missing
+        # 0. Try to resolve conId and/or snap from DB first if conId is missing
+        # Format in DB is: TICKER YYYYMMDD STRIKE RIGHT
+        
+        # Normalize expiry to avoid mismatch (remove hyphens)
+        expiry = expiry.replace("-", "")
+
         if not conId:
-            # Try to find a snapshot that matches the contract parameters
-            # Format in DB is: TICKER YYYYMMDD STRIKE RIGHT
-            # We use a pattern match to be flexible
-            pattern = f"{underlying}%{strike}%{right}"
+            # We use a pattern match to be flexible, but MUST include expiry to avoid
+            # matching staled/wrong contracts with same underlying/strike/right
+            pattern = f"{underlying}%{expiry}%{strike}%{right}"
             snap = db.query(OptionSnapshot).filter(
                 OptionSnapshot.symbol.like(pattern)).first()
             if snap:
                 conId = snap.conId
                 logger.info(
-                    f"Resolved conId={conId} from database snapshot for {underlying}")
+                    f"Resolved conId={conId} from database snapshot for {underlying} {expiry}")
 
         # 1. If we still don't have conId, try live positions (if possible)
         if not conId:

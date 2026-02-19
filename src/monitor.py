@@ -122,7 +122,7 @@ class Monitor:
                     expiry = opt.get('expiry', '')
 
                     strike_fmt = f"{strike:.0f}" if strike == int(strike) else f"{strike}"
-                    exp_fmt = expiry
+                    exp_fmt = expiry.replace("-", "")
                     display = f"{underlying} {right} {strike_fmt} {exp_fmt}"
 
                     delta_alerts.append({

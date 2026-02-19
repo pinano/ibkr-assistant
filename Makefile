@@ -44,3 +44,6 @@ clean:
 
 status:
 	$(COMPOSE) ps
+
+db:
+	$(COMPOSE) exec ibkr-db sh -c 'mariadb -u root -p"$$MARIADB_ROOT_PASSWORD" "$$MARIADB_DATABASE"'
