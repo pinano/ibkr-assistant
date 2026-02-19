@@ -212,8 +212,9 @@ def _greeks_are_valid(g, und_price_override=None):
 
     if delta == 0 and gamma == 0 and theta == 0 and vega == 0:
         return False
-    if und == 0:
-        return False
+    # Relaxed check: Allow greeks even if underlying price is 0 (could be delayed data)
+    # if und == 0:
+    #     return False
     return True
 
 
@@ -717,8 +718,11 @@ async def get_option_greeks(
 
         display_symbol = f"{underlying} {expiry} {strike} {right}"
 
-        # Update Cache — only if Greeks are valid
-        if qualified and qualified[0] and _greeks_are_valid(g):
+        # Update Cache — if Greeks are valid OR if we have a valid last price
+        has_valid_greeks = _greeks_are_valid(g)
+        has_valid_price = t_last is not None and not math.isnan(t_last) and t_last > 0
+
+        if qualified and qualified[0] and (has_valid_greeks or has_valid_price):
             cid = qualified[0].conId
             # ALWAYS create a new snapshot record for history log
             snap = OptionSnapshot(conId=cid)
@@ -735,7 +739,7 @@ async def get_option_greeks(
             snap.last_price = safe_float(t_last)
 
             db.commit()
-            logger.info(f"Cached valid Greeks for {display_symbol} (conId={cid})")
+            logger.info(f"Cached data for {display_symbol} (conId={cid}, Greeks={has_valid_greeks}, Price={has_valid_price})")
         elif qualified and qualified[0]:
             logger.warning(f"Skipping DB cache for {display_symbol}: Greeks data invalid (all zeros or missing underlying price)")
 

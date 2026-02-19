@@ -28,7 +28,6 @@ Ensure your external Traefik instance is connected to the `traefik` network defi
     *   **Local Reprocessing**: Ability to re-parse and re-report on any archived XML file via the bot.
     *   **Email Reports**: Automated HTML email delivery of the reports.
 *   **Google Sheets Integration**: Custom function (`GETOPTIONDATA`) to fetch option Greeks from CBOE (US) or IBKR API (European) directly into spreadsheets. See `docs/google-sheets-script.js`.
-    *   **Tip**: Add a checkbox to a cell (e.g., `A1`) and pass it as the last argument to `GETOPTIONDATA` to force a refresh when clicked!
 
 ## 🏗 Architecture
 
