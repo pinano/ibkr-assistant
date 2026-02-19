@@ -391,7 +391,7 @@ async def process_opt_details(callback: types.CallbackQuery):
 
             # Format display label
             strike_fmt = f"{strike:.0f}" if strike == int(strike) else f"{strike}"
-            exp_fmt = f"{expiry[0:4]}{expiry[4:6]}{expiry[6:8]}" if len(expiry) == 8 else expiry
+            exp_fmt = f"{expiry[0:4]}-{expiry[4:6]}-{expiry[6:8]}" if len(expiry) == 8 else expiry
             display = f"{underlying} {right} {strike_fmt} {exp_fmt}"
 
             msg = (
@@ -1138,8 +1138,7 @@ async def cmd_delta(m: types.Message):
                         qty = opt.get('qty', 0)
 
                         strike_fmt = f"{strike:.0f}" if strike == int(strike) else f"{strike}"
-                        exp_fmt = f"{expiry[0:4]}-{expiry[4:6]}-{expiry[6:8]}" if len(
-                            expiry) == 8 else expiry
+                        exp_fmt = expiry
                         display = f"{underlying} {right} {strike_fmt} {exp_fmt}"
 
                         results.append({
