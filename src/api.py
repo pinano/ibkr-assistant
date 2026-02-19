@@ -585,6 +585,8 @@ async def get_option_greeks(
                 status_code=400,
                 detail=f"Invalid right: {right}. Must be P or C")
 
+        display_symbol = f"{underlying} {expiry} {strike} {right}"
+
         from datetime import timedelta
         snap = None
 
@@ -632,7 +634,10 @@ async def get_option_greeks(
                 ).order_by(OptionSnapshot.updated_at.desc()).first()
 
             # Identify if likely US or EU
-            is_likely_us = '.' not in underlying or underlying in ['SPX', 'VIX', 'NDX', 'RUT']
+            if prefix_exchange:
+                is_likely_us = False
+            else:
+                is_likely_us = '.' not in underlying or underlying in ['SPX', 'VIX', 'NDX', 'RUT']
             is_eu_closed = not is_likely_us and not _is_eu_market_open()
             
             # Cache Criteria:
@@ -678,7 +683,10 @@ async def get_option_greeks(
         
         # Simple heuristic: if it looks like a US ticker (no suffix), try CBOE
         # or if we explicitly know it's US.
-        is_likely_us = '.' not in underlying or underlying in ['SPX', 'VIX', 'NDX', 'RUT']
+        if prefix_exchange:
+            is_likely_us = False
+        else:
+            is_likely_us = '.' not in underlying or underlying in ['SPX', 'VIX', 'NDX', 'RUT']
         
         if is_likely_us and not force_refresh:
             try:
