@@ -9,7 +9,7 @@ except ImportError:
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
 from aiogram.utils.keyboard import InlineKeyboardBuilder
-from sqlalchemy import create_engine, func
+from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from src.flex import FlexReporter
@@ -22,7 +22,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("ibkr-bot")
 
 # DB Setup
-engine = create_engine(settings.DB_URL)
+engine = create_engine(settings.DB_URL, pool_pre_ping=True)
 SessionLocal = sessionmaker(bind=engine)
 
 # Ensure tables exist
@@ -352,8 +352,7 @@ async def cmd_options(m: types.Message):
             await m.answer(f"❌ API Error: {err_detail}")
         except Exception as e:
             logger.error(f"Error in /options: {e}", exc_info=True)
-            msg = str(e) or repr(e)
-            await m.answer(f"❌ Error: {msg}")
+            await m.answer("❌ Error interno. Revisa los logs.")
 
 
 @dp.callback_query(F.data == "noop")
@@ -479,8 +478,7 @@ async def cmd_max(m: types.Message):
             await m.answer(f"❌ API Error: {err_detail}")
         except Exception as e:
             logger.error(f"Error in /max: {e}", exc_info=True)
-            msg = str(e) or repr(e)
-            await m.answer(f"❌ Error: {msg}")
+            await m.answer("❌ Error interno. Revisa los logs.")
 
 
 @dp.message(Command("today", ignore_case=True))
@@ -545,9 +543,8 @@ async def cmd_today(m: types.Message):
                 session.close()
 
         except Exception as e:
-            logger.error(f"Error in cmd_today: {e}")
-            msg = str(e) or repr(e)
-            await m.answer(f"❌ Error: {msg}")
+            logger.error(f"Error in cmd_today: {e}", exc_info=True)
+            await m.answer("❌ Error interno. Revisa los logs.")
 
 
 @dp.message(Command("year", ignore_case=True))
@@ -670,8 +667,7 @@ async def cmd_year(m: types.Message):
 
         except Exception as e:
             logger.error(f"Error in cmd_year: {e}", exc_info=True)
-            msg = str(e) or repr(e)
-            await m.answer(f"❌ Error: {msg}")
+            await m.answer("❌ Error interno. Revisa los logs.")
 
 
 @dp.message(Command("help", ignore_case=True))
@@ -819,8 +815,7 @@ async def cmd_quote(m: types.Message):
             await msg.edit_text(f"❌ API Error: {err_detail}")
         except Exception as e:
             logger.error(f"Error in /quote: {e}", exc_info=True)
-            txt = str(e) or repr(e)
-            await msg.edit_text(f"❌ Error: {txt}")
+            await msg.edit_text("❌ Error interno. Revisa los logs.")
 
 
 @dp.message(Command("contract", ignore_case=True))
@@ -993,7 +988,10 @@ async def scheduled_flex_report(
                         scheduled_flex_report,
                         'date',
                         run_date=next_run,
-                        args=[query_id, report_type, retry_count + 1]
+                        args=[query_id, report_type, retry_count + 1],
+                        id=f'flex_retry_{report_type}',
+                        replace_existing=True,
+                        max_instances=1
                     )
                     logger.info(f"Rescheduled {report_type} Flex Report retry #{retry_count + 1} for {next_run}")
                     return
@@ -1042,7 +1040,10 @@ async def scheduled_flex_report(
                     scheduled_flex_report,
                     'date',
                     run_date=next_run,
-                    args=[query_id, report_type, retry_count + 1]
+                    args=[query_id, report_type, retry_count + 1],
+                    id=f'flex_retry_{report_type}',
+                    replace_existing=True,
+                    max_instances=1
                 )
                 logger.info(f"Rescheduled {report_type} Flex Report retry #{retry_count + 1} (due to error) for {next_run}")
             else:
@@ -1185,7 +1186,7 @@ async def cmd_delta(m: types.Message):
 
     except Exception as e:
         logger.error(f"Error in /delta: {e}", exc_info=True)
-        await m.answer(f"❌ Error: {e}")
+        await m.answer("❌ Error interno. Revisa los logs.")
 
 
 async def main():
@@ -1297,7 +1298,14 @@ async def main():
         'cron',
         hour=4,
         minute=0,
-        id='db_cleanup'
+        id='db_cleanup_snapshots'
+    )
+    scheduler.add_job(
+        monitor.prune_old_market_cache,
+        'cron',
+        hour=4,
+        minute=5,
+        id='db_cleanup_market_cache'
     )
 
     check_cron_log = check_cron if effective_check_mins else 'None (covered by snapshots)'

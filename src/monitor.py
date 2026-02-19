@@ -2,7 +2,6 @@ import logging
 import asyncio
 import httpx
 import datetime
-from sqlalchemy.orm import Session
 
 from src.config import settings
 
@@ -39,10 +38,30 @@ class Monitor:
         finally:
             session.close()
 
+    async def prune_old_market_cache(self, days_retention=7):
+        """Delete market cache entries older than retention period."""
+        from src.models import MarketCache
+        logger.info(f"Pruning market cache older than {days_retention} days...")
+        session = self.SessionLocal()
+        try:
+            cutoff_date = datetime.datetime.now() - datetime.timedelta(days=days_retention)
+            deleted_count = session.query(MarketCache).filter(
+                MarketCache.updated_at < cutoff_date
+            ).delete()
+            session.commit()
+            if deleted_count > 0:
+                logger.info(f"Pruned {deleted_count} old market cache entries.")
+            else:
+                logger.info("No old market cache entries to prune.")
+        except Exception as e:
+            logger.error(f"Error pruning market cache: {e}")
+            session.rollback()
+        finally:
+            session.close()
+
     async def check_alerts(self):
         from src.bot import notify_admins
         logger.info("Checking alerts...")
-        session = self.SessionLocal()
         try:
             # 2. Global Monitoring (All Open Options)
             # Fetch all positions first
@@ -165,10 +184,13 @@ class Monitor:
                 for a in delta_alerts:
                     self.global_alert_cache[a['con_id']] = now
 
+            # Purge stale entries from alert cache (options no longer in portfolio)
+            stale_keys = [k for k in self.global_alert_cache if k not in option_map]
+            for k in stale_keys:
+                del self.global_alert_cache[k]
+
         except Exception as e:
             logger.error(f"Error in check_alerts: {e}", exc_info=True)
-        finally:
-            session.close()
 
     async def refresh_greeks_cache(self):
         """

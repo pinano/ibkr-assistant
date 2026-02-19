@@ -18,6 +18,12 @@ services:
       - ALLOW_BLIND_TRADING=${ALLOW_BLIND_TRADING}
       - TZ=${TZ}
       - TIME_ZONE=${TZ}
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z localhost ${IB_PORT} || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 60s
     networks:
       - ibkr
 
@@ -66,7 +72,7 @@ services:
       ibkr-db:
         condition: service_healthy
       ibkr-gateway:
-        condition: service_started
+        condition: service_healthy
     networks:
       - traefik
       - ibkr
