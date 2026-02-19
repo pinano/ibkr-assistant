@@ -118,15 +118,20 @@ async def get_option_greeks(
             is_fresh = snap and snap.updated_at > datetime.now() - timedelta(minutes=60)
 
             use_cache = False
-            if snap and not force_refresh and is_valid:
-                if is_fresh:
+            if snap and not force_refresh:
+                if is_valid and is_fresh:
                     use_cache = True
-                elif is_eu_closed:
+                elif is_valid and is_eu_closed:
                     use_cache = True
                     logger.info(f"EU Market Closed: Serving extended cache for {underlying}")
+                elif is_eu_closed and is_fresh:
+                    # EU closed + freshly cached frozen data (Greeks may be zero but it's
+                    # the best we have until the market reopens)
+                    use_cache = True
+                    logger.info(f"EU Market Closed: Serving fresh frozen cache for {underlying}")
 
             if use_cache:
-                logger.info(f"Serving fresh cached greeks for conId={conId}")
+                logger.info(f"Serving cached greeks for conId={conId}")
                 return OptionGreeks(
                     symbol=snap.symbol,
                     delta=snap.delta or 0.0,
@@ -140,7 +145,7 @@ async def get_option_greeks(
                     open_interest=0,
                     last_date=snap.updated_at.strftime("%Y-%m-%d %H:%M:%S") if snap.updated_at else None
                 )
-            elif not force_refresh and snap and is_fresh and not is_valid:
+            elif not force_refresh and snap and is_fresh and not is_valid and not is_eu_closed:
                 logger.warning(f"Cached data for conId={conId} has invalid Greeks, forcing live fetch")
 
         # 2b. Check CBOE (for US options)
@@ -341,12 +346,24 @@ async def get_option_greeks(
         has_valid_greeks = _greeks_are_valid(g)
         has_valid_price = t_last is not None and not math.isnan(t_last) and t_last > 0
 
+        # Determine if this is a non-US option during closed EU hours
+        if prefix_exchange:
+            is_likely_us_for_save = False
+        else:
+            is_likely_us_for_save = '.' not in underlying or underlying in ['SPX', 'VIX', 'NDX', 'RUT']
+        eu_closed = not is_likely_us_for_save and not _is_eu_market_open()
+
         should_save = False
         if qualified and qualified[0]:
              if has_valid_greeks:
                  should_save = True
              elif has_valid_price:
                  should_save = True
+             elif eu_closed and g is not None:
+                 # EU market is closed — frozen data is the best we'll get.
+                 # Cache it to avoid hammering the gateway on every request.
+                 should_save = True
+                 logger.info(f"EU closed: caching frozen data for {display_symbol} (Greeks may be partial)")
 
         if should_save:
             cid = qualified[0].conId
