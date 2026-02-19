@@ -169,7 +169,12 @@ function _fetchFromIBKR(ticker, expDate, type, formattedStrike) {
             return null;
         }
 
-        const data = JSON.parse(response.getContentText());
+        let data;
+        try {
+            data = JSON.parse(response.getContentText());
+        } catch (e) {
+            return null; // Invalid JSON
+        }
 
         // Map the IBKR response to the same order as CBOE:
         // [delta, gamma, theta, iv, open_interest, volume, last_trade_price, last_trade_time]
@@ -220,11 +225,22 @@ function GETFXRATE(pair) {
         });
 
         if (response.getResponseCode() !== 200) {
-            const errorData = JSON.parse(response.getContentText());
-            return 'Error: ' + (errorData.detail || 'API request failed');
+            let errorMsg = 'API request failed';
+            try {
+                const errorData = JSON.parse(response.getContentText());
+                errorMsg = errorData.detail || errorMsg;
+            } catch (e) {
+                errorMsg = `API Error (${response.getResponseCode()}): ${response.getContentText().substring(0, 100)}`;
+            }
+            return 'Error: ' + errorMsg;
         }
 
-        const data = JSON.parse(response.getContentText());
+        let data;
+        try {
+            data = JSON.parse(response.getContentText());
+        } catch (e) {
+            return 'Error: Invalid JSON response from API';
+        }
         return data.price || 'Error: No price data available';
 
     } catch (e) {
