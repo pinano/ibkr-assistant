@@ -10,6 +10,11 @@ from fastapi import FastAPI, HTTPException, Security, Depends
 from fastapi.security.api_key import APIKeyHeader
 from ib_async import IB, Option, Contract, ExecutionFilter
 
+try:
+    from zoneinfo import ZoneInfo
+except ImportError:
+    from backports.zoneinfo import ZoneInfo
+
 from src.config import settings
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, Session
@@ -229,9 +234,26 @@ def _snap_is_valid(snap):
     u = snap.underlying_price or 0.0
     if d == 0 and g == 0 and t == 0 and v == 0:
         return False
-    if u == 0:
-        return False
+    # Relaxed check: Allow greeks even if underlying price is 0
+    # if u == 0:
+    #     return False
     return True
+
+
+def _is_eu_market_open():
+    """Return True if within EU market hours (Mon-Fri, 09:00-18:00)."""
+    try:
+        tz = ZoneInfo(settings.TZ)
+        now = datetime.now(tz)
+    except Exception:
+        now = datetime.now()
+
+    # Mon=0, Sun=6
+    if now.weekday() >= 5:
+        return False
+    if 9 <= now.hour < 18:
+        return True
+    return False
 
 
 async def get_ib():
@@ -560,9 +582,26 @@ async def get_option_greeks(
                     OptionSnapshot.conId == conId
                 ).order_by(OptionSnapshot.updated_at.desc()).first()
 
-            # If we have a fresh cache (< 60 mins) with valid data, return it
-            if not force_refresh and snap and snap.updated_at > datetime.now() - \
-                    timedelta(minutes=60) and _snap_is_valid(snap):
+            # Identify if likely US or EU
+            is_likely_us = '.' not in underlying or underlying in ['SPX', 'VIX', 'NDX', 'RUT']
+            is_eu_closed = not is_likely_us and not _is_eu_market_open()
+            
+            # Cache Criteria:
+            # 1. Fresh (< 60 mins) AND Valid
+            # 2. OR: EU Market Closed AND Valid (serve stale cache if market is closed)
+            
+            is_valid = _snap_is_valid(snap)
+            is_fresh = snap and snap.updated_at > datetime.now() - timedelta(minutes=60)
+            
+            use_cache = False
+            if snap and not force_refresh and is_valid:
+                if is_fresh:
+                    use_cache = True
+                elif is_eu_closed:
+                    use_cache = True
+                    logger.info(f"EU Market Closed: Serving extended cache for {underlying}")
+
+            if use_cache:
                 logger.info(f"Serving fresh cached greeks for conId={conId}")
                 return OptionGreeks(
                     symbol=snap.symbol,
@@ -577,8 +616,7 @@ async def get_option_greeks(
                     open_interest=0,
                     last_date=snap.updated_at.strftime("%Y-%m-%d %H:%M:%S") if snap.updated_at else None
                 )
-            elif not force_refresh and snap and snap.updated_at > datetime.now() - \
-                    timedelta(minutes=60) and not _snap_is_valid(snap):
+            elif not force_refresh and snap and is_fresh and not is_valid:
                 logger.warning(f"Cached data for conId={conId} has invalid Greeks, forcing live fetch")
 
         # 3. If we get here, we want live data (or cache was stale)
