@@ -22,12 +22,17 @@ class Monitor:
         session = self.SessionLocal()
         try:
             cutoff_date = datetime.datetime.now() - datetime.timedelta(days=days_retention)
+            logger.info(f"Cutoff date for pruning: {cutoff_date}")
+            
             # Use synchronize_session=False for performance on bulk delete
             deleted_count = session.query(OptionSnapshot).filter(
                 OptionSnapshot.updated_at < cutoff_date
             ).delete()
             session.commit()
-            logger.info(f"Pruned {deleted_count} old snapshots.")
+            if deleted_count > 0:
+                logger.info(f"Pruned {deleted_count} old option snapshots (updated before {cutoff_date.strftime('%Y-%m-%d %H:%M')}).")
+            else:
+                logger.info("No old snapshots found to prune.")
         except Exception as e:
             logger.error(f"Error pruning snapshots: {e}")
             session.rollback()

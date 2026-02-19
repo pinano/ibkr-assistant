@@ -140,7 +140,8 @@ class CashBalance(Base):
 class OptionSnapshot(Base):
     __tablename__ = 'option_snapshots'
 
-    conId = Column(Integer, primary_key=True)
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    conId = Column(Integer, index=True)
     symbol = Column(String(50))  # e.g. "RMS 260220 P 1860"
     updated_at = Column(DateTime, default=datetime.now)
 

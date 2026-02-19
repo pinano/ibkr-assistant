@@ -16,6 +16,7 @@ help:
 	@echo "  make clean     Remove dangling/untagged images (<none>)"
 	@echo "  make logs      Tail logs from all containers"
 	@echo "  make status    Show container status"
+	@echo "  make db        Open MariaDB console"
 	@echo ""
 
 init:

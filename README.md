@@ -28,6 +28,7 @@ Ensure your external Traefik instance is connected to the `traefik` network defi
     *   **Local Reprocessing**: Ability to re-parse and re-report on any archived XML file via the bot.
     *   **Email Reports**: Automated HTML email delivery of the reports.
 *   **Google Sheets Integration**: Custom function (`GETOPTIONDATA`) to fetch option Greeks from CBOE (US) or IBKR API (European) directly into spreadsheets. See `docs/google-sheets-script.js`.
+    *   **Tip**: Add a checkbox to a cell (e.g., `A1`) and pass it as the last argument to `GETOPTIONDATA` to force a refresh when clicked!
 
 ## 🏗 Architecture
 
@@ -84,6 +85,7 @@ The project uses a `Makefile` for lifecycle management:
 | `make rebuild` | Rebuild images from scratch and recreate all containers |
 | `make logs` | Tail logs from all containers |
 | `make status` | Show container status |
+| `make db` | Open MariaDB console inside the database container |
 
 ### 🤖 Telegram Bot Commands
 

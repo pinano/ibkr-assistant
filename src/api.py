@@ -528,7 +528,8 @@ async def get_option_greeks(
             # matching staled/wrong contracts with same underlying/strike/right
             pattern = f"{underlying}%{expiry}%{strike}%{right}"
             snap = db.query(OptionSnapshot).filter(
-                OptionSnapshot.symbol.like(pattern)).first()
+                OptionSnapshot.symbol.like(pattern)
+            ).order_by(OptionSnapshot.updated_at.desc()).first()
             if snap:
                 conId = snap.conId
                 logger.info(
@@ -555,7 +556,8 @@ async def get_option_greeks(
         if conId:
             if not snap:
                 snap = db.query(OptionSnapshot).filter(
-                    OptionSnapshot.conId == conId).first()
+                    OptionSnapshot.conId == conId
+                ).order_by(OptionSnapshot.updated_at.desc()).first()
 
             # If we have a fresh cache (< 60 mins) with valid data, return it
             if not force_refresh and snap and snap.updated_at > datetime.now() - \
@@ -718,11 +720,9 @@ async def get_option_greeks(
         # Update Cache — only if Greeks are valid
         if qualified and qualified[0] and _greeks_are_valid(g):
             cid = qualified[0].conId
-            snap = db.query(OptionSnapshot).filter(
-                OptionSnapshot.conId == cid).first()
-            if not snap:
-                snap = OptionSnapshot(conId=cid)
-                db.add(snap)
+            # ALWAYS create a new snapshot record for history log
+            snap = OptionSnapshot(conId=cid)
+            db.add(snap)
 
             snap.symbol = display_symbol
             snap.updated_at = datetime.now()
