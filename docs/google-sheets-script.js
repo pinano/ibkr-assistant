@@ -25,7 +25,7 @@ function GETOPTIONDATA(param1, param2, param3, param4) {
     try {
         if (arguments.length === 1) {
             // Case 1: Full OCC search string.
-            const regex = /^([A-Z\.]+)(\d{6})([CP])(\d{8})$/;
+            const regex = /^([A-Z\.:]+)(\d{6})([CP])(\d{8})$/;
             const match = param1.match(regex);
 
             if (!match) return [['Error: Invalid string format.']];

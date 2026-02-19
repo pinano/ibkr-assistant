@@ -92,6 +92,20 @@ MARKET_SUFFIXES = {
     ".MI": ("BVME", "EUR"),    # Italy (Milan)
 }
 
+# Exchange Prefix Mapping (Google Finance / Yahoo Finance style -> IBKR)
+# We use SMART for options as specific stock exchanges (like SBF) often don't list options directly.
+# The currency is the key differentiator.
+EXCHANGE_PREFIXES = {
+    "EPA": ("MONEP", "EUR"),    # Paris -> MONEP
+    "AMS": ("FTA", "EUR"),      # Amsterdam -> FTA (approx, often EUREX in practice but FTA is the code)
+    "ETR": ("DTB", "EUR"),      # Xetra -> DTB (Eurex)
+    "FRA": ("DTB", "EUR"),      # Frankfurt -> DTB
+    "LON": ("LSE", "GBP"),      # London
+    "SWX": ("EBS", "CHF"),      # SWX -> EBS (Swiss)
+    "MC":  ("MEFF", "EUR"),     # Madrid -> MEFF
+    "MCE": ("MEFF", "EUR"),     # Madrid (alternative)
+}
+
 
 def parse_symbol(symbol: str) -> tuple:
     """
@@ -552,6 +566,20 @@ async def get_option_greeks(
         underlying = underlying.strip()
         expiry = expiry.strip()
 
+        # Check for explicit exchange prefix (e.g. "EPA:MC")
+        prefix_exchange = None
+        prefix_currency = None
+        
+        if ':' in underlying:
+            parts = underlying.split(':')
+            if len(parts) == 2:
+                prefix = parts[0].upper()
+                underlying = parts[1] # Update underlying to be the part after colon
+                
+                if prefix in EXCHANGE_PREFIXES:
+                    prefix_exchange, prefix_currency = EXCHANGE_PREFIXES[prefix]
+                    logger.info(f"Using explicit prefix {prefix} -> {prefix_exchange}, {prefix_currency}")
+
         if right not in ('P', 'C'):
             raise HTTPException(
                 status_code=400,
@@ -709,7 +737,13 @@ async def get_option_greeks(
 
             if not qualified or not qualified[0]:
                 # Parse ticker (handling suffixes) to get correct currency/exchange info
-                ticker, _, currency = parse_symbol(underlying)
+                if prefix_currency:
+                    ticker = underlying
+                    currency = prefix_currency
+                    exchange = prefix_exchange or "SMART"
+                else:
+                    ticker, _, currency = parse_symbol(underlying)
+                    exchange = "SMART"
                 
                 # Use the helper to qualify the contract
                 qualified = await _qualify_option_contract(
@@ -718,7 +752,8 @@ async def get_option_greeks(
                     expiry, 
                     strike, 
                     right, 
-                    currency
+                    currency,
+                    exchange
                 )
 
         except Exception as e:
@@ -929,19 +964,8 @@ async def get_option_risk(symbol: str):
     client = await get_ib()
     client.reqMarketDataType(4)  # Delayed-Frozen fallback
 
-    # Exchange Prefix Mapping (Google Finance / Yahoo Finance style -> IBKR)
-    # We use SMART for options as specific stock exchanges (like SBF) often don't list options directly.
-    # The currency is the key differentiator.
-    EXCHANGE_PREFIXES = {
-        "EPA": ("MONEP", "EUR"),    # Paris -> MONEP
-        "AMS": ("FTA", "EUR"),      # Amsterdam -> FTA (approx, often EUREX in practice but FTA is the code)
-        "ETR": ("DTB", "EUR"),      # Xetra -> DTB (Eurex)
-        "FRA": ("DTB", "EUR"),      # Frankfurt -> DTB
-        "LON": ("LSE", "GBP"),      # London
-        "SWX": ("EBS", "CHF"),      # SWX -> EBS (Swiss)
-        "MC":  ("MEFF", "EUR"),     # Madrid -> MEFF
-        "MCE": ("MEFF", "EUR"),     # Madrid (alternative)
-    }
+    client.reqMarketDataType(4)  # Delayed-Frozen fallback
+
 
     try:
         symbol = symbol.strip()
