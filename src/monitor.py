@@ -158,6 +158,9 @@ class Monitor:
 
             # Send a single digest if there are any high-delta alerts
             if delta_alerts:
+                # Sort by absolute delta descending
+                delta_alerts.sort(key=lambda x: abs(x['delta']), reverse=True)
+                
                 logger.info(f"Global Delta Alert: {len(delta_alerts)} contract(s) above threshold")
 
                 # Calculate max display width for alignment
