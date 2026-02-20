@@ -10,6 +10,15 @@ ib = IB()
 _ib_lock = asyncio.Lock()  # Protects concurrent reconnection attempts
 
 
+def _on_disconnected():
+    """Called when the IB Gateway connection drops unexpectedly.
+    Logs the event so that the next get_ib() call triggers a reconnect."""
+    logger.warning("IBKR Gateway disconnected. Next request will trigger reconnection.")
+
+
+ib.disconnectedEvent += _on_disconnected
+
+
 async def get_ib():
     if ib.isConnected():
         return ib

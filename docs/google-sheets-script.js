@@ -20,7 +20,7 @@ const IBKR_API_TIMEOUT = 25; // seconds (API has internal 20s timeout)
  * @param {string} param2 - Expiration date (YYMMDD) when passing 4 params.
  * @param {string} param3 - Type (C or P) when passing 4 params.
  * @param {number} param4 - Strike when passing 4 params.
- * @return {Array} Row with [delta, gamma, theta, vega, iv, open_interest, volume, last_trade_price, last_trade_time].
+ * @return {Array} Row with [delta, gamma, theta, iv, open_interest, volume, last_trade_price, last_trade_time].
  * @customfunction
  */
 function GETOPTIONDATA(param1, param2, param3, param4) {
@@ -86,7 +86,7 @@ function GETOPTIONDATA(param1, param2, param3, param4) {
  * reuses the cached CBOE JSON across tickers.
  *
  * @param {Array} range - A Nx4 range where each row is [ticker, expDate, type, strike].
- * @return {Array} Nx9 array of results.
+ * @return {Array} Nx8 array of results.
  * @customfunction
  */
 function GETOPTIONBATCH(range) {
@@ -96,13 +96,13 @@ function GETOPTIONBATCH(range) {
 
     return range.map(function (row) {
         if (!row || row.length < 4 || !row[0]) {
-            return ['', '', '', '', '', '', '', '', ''];
+            return ['', '', '', '', '', '', '', ''];
         }
         try {
             var result = GETOPTIONDATA(row[0], row[1], row[2], row[3]);
             return result[0];
         } catch (e) {
-            return ['Error: ' + e.message, '', '', '', '', '', '', '', ''];
+            return ['Error: ' + e.message, '', '', '', '', '', '', ''];
         }
     });
 }
@@ -320,6 +320,15 @@ function GETFXRATE(pair) {
             return 'Error: Invalid pair format. Use "EURUSD".';
         }
 
+        // Check cache first
+        const cacheKey = 'fx_' + cleanPair;
+        const cache = CacheService.getScriptCache();
+        const cached = cache.get(cacheKey);
+        if (cached) {
+            const val = parseFloat(cached);
+            return isNaN(val) ? cached : val; // Return number if valid, error string otherwise
+        }
+
         const url = IBKR_API_URL + '/market/snapshot/' + cleanPair;
 
         const response = UrlFetchApp.fetch(url, {
@@ -345,9 +354,12 @@ function GETFXRATE(pair) {
         } catch (e) {
             return 'Error: Invalid JSON response from API';
         }
-        return (data.price !== null && data.price !== undefined)
-            ? data.price
-            : 'Error: No price data available';
+
+        if (data.price !== null && data.price !== undefined) {
+            try { cache.put(cacheKey, String(data.price), CACHE_TTL); } catch (e) { }
+            return data.price;
+        }
+        return 'Error: No price data available';
 
     } catch (e) {
         return 'Error: ' + e.message;

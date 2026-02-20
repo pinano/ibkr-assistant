@@ -216,8 +216,7 @@ async def cmd_nav(m: types.Message):
             await m.answer(f"❌ API Error: {err_detail}")
         except Exception as e:
             logger.error(f"Error in /nav: {e}", exc_info=True)
-            msg = str(e) or repr(e)
-            await m.answer(f"❌ Error: {msg}")
+            await m.answer("❌ Error interno. Revisa los logs.")
 
 
 @dp.message(Command("pos", ignore_case=True))
@@ -280,8 +279,7 @@ async def cmd_pos(m: types.Message):
             await m.answer(f"❌ API Error: {err_detail}")
         except Exception as e:
             logger.error(f"Error in /pos: {e}", exc_info=True)
-            msg = str(e) or repr(e)
-            await m.answer(f"❌ Error: {msg}")
+            await m.answer("❌ Error interno. Revisa los logs.")
 
 
 @dp.message(Command("options", ignore_case=True))
@@ -420,8 +418,7 @@ async def process_opt_details(callback: types.CallbackQuery):
             await callback.answer()
         except Exception as e:
             logger.error(f"Error in /options callback: {e}", exc_info=True)
-            msg = str(e) or repr(e)
-            await callback.message.answer(f"❌ Error fetching details: {msg}")
+            await callback.message.answer("❌ Error interno. Revisa los logs.")
             await callback.answer()
 
 
@@ -722,8 +719,7 @@ async def cmd_orders(m: types.Message):
             await m.answer(f"❌ API Error: {err_detail}")
         except Exception as e:
             logger.error(f"Error in /orders: {e}", exc_info=True)
-            msg = str(e) or repr(e)
-            await m.answer(f"❌ Error: {msg}")
+            await m.answer("❌ Error interno. Revisa los logs.")
 
 
 @dp.message(Command("trades", ignore_case=True))
@@ -755,8 +751,7 @@ async def cmd_trades(m: types.Message):
             await m.answer(f"❌ API Error: {err_detail}")
         except Exception as e:
             logger.error(f"Error in /trades: {e}", exc_info=True)
-            msg = str(e) or repr(e)
-            await m.answer(f"❌ Error: {msg}")
+            await m.answer("❌ Error interno. Revisa los logs.")
 
 
 @dp.message(Command("quote", ignore_case=True))
@@ -856,8 +851,7 @@ async def cmd_contract(m: types.Message):
             await m.answer(f"❌ API Error: {err_detail}")
         except Exception as e:
             logger.error(f"Error in /contract: {e}", exc_info=True)
-            msg = str(e) or repr(e)
-            await m.answer(f"❌ Error: {msg}")
+            await m.answer("❌ Error interno. Revisa los logs.")
 
 
 @dp.message(Command("chain", ignore_case=True))
@@ -929,8 +923,7 @@ async def cmd_chain(m: types.Message):
             await msg.edit_text(f"❌ API Error: {err_detail}")
         except Exception as e:
             logger.error(f"Error in /chain: {e}", exc_info=True)
-            txt = str(e) or repr(e)
-            await msg.edit_text(f"❌ Error: {txt}")
+            await msg.edit_text("❌ Error interno. Revisa los logs.")
 
 # Scheduler
 
@@ -943,7 +936,7 @@ async def check_token_expiry():
         # Expected format: "2026-02-18, 05:34:27 EST"
         expiry_str = settings.IB_FLEX_TOKEN_EXPIRY.split(',')[0].strip()
         expiry_date = datetime.strptime(expiry_str, "%Y-%m-%d")
-        days_left = (expiry_date - datetime.now()).days
+        days_left = (expiry_date - get_now().replace(tzinfo=None)).days
 
         if 0 <= days_left <= 10:
             await notify_admins(
@@ -1140,13 +1133,25 @@ async def cmd_delta(m: types.Message):
 
                         strike_fmt = f"{strike:.0f}" if strike == int(strike) else f"{strike}"
                         exp_fmt = expiry.replace("-", "")
-                        display = f"{underlying} {right} {strike_fmt} {exp_fmt}"
+                        display = f"{underlying} {right}{strike_fmt} {exp_fmt}"
+
+                        # Calculate data age in minutes
+                        age_str = ""
+                        last_date_str = data.get('last_date')
+                        if last_date_str:
+                            try:
+                                last_dt = datetime.strptime(last_date_str, "%Y-%m-%d %H:%M:%S")
+                                age_min = int((datetime.now() - last_dt).total_seconds() / 60)
+                                age_str = f"({age_min}m)"
+                            except (ValueError, TypeError):
+                                pass
 
                         results.append({
                             'display': display,
                             'delta': delta,
                             'qty': qty,
-                            'high': abs(delta) > settings.DELTA_ALERT_THRESHOLD
+                            'high': abs(delta) > settings.DELTA_ALERT_THRESHOLD,
+                            'age': age_str
                         })
                 except Exception as e:
                     logger.debug(
@@ -1173,11 +1178,12 @@ async def cmd_delta(m: types.Message):
             for r in results:
                 marker = "🔴" if r['high'] else "🟢"
                 display_padded = r['display'].ljust(pad)
-                delta_str = f"{r['delta']:+.3f}".rjust(7)
-                qty_str = f"({r['qty']:.0f})".rjust(4)
+                delta_str = f"{r['delta']:+.3f}"
+                qty_str = f"{r['qty']:.0f}"
+                age = f", {r['age'].strip('()')}" if r.get('age') else ""
 
                 lines.append(
-                    f"{marker} <code>{display_padded} Δ{delta_str} {qty_str}</code>"
+                    f"{marker} <code>{display_padded} Δ{delta_str}: {qty_str}{age}</code>"
                 )
 
             lines.append(f"\n🔴 abs(Δ) &gt; {settings.DELTA_ALERT_THRESHOLD}  🟢 abs(Δ) ≤ {settings.DELTA_ALERT_THRESHOLD}")

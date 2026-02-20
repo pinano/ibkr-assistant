@@ -104,7 +104,7 @@ async def _fetch_cboe_greeks(ticker: str, expiry: str, strike: float, right: str
 def _greeks_are_valid(g, und_price_override=None):
     """Return True if the Greeks data is meaningful enough to cache.
 
-    Requires at least one non-zero Greek AND a non-zero underlying price.
+    Requires at least one non-zero Greek (delta, gamma, theta, or vega).
     """
     if not g:
         return False

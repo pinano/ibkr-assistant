@@ -94,24 +94,34 @@ class Monitor:
                     return
 
                 # Fetch Greeks for all open options via /option/greeks
-                # (conId-based)
+                # (conId-based) — parallelized with controlled concurrency
                 market_data = {}  # conId -> greeks
-                for con_id, opt in option_map.items():
-                    try:
-                        params = {
-                            'underlying': opt.get('underlying', ''),
-                            'expiry': opt.get('expiry', ''),
-                            'strike': opt.get('strike', 0),
-                            'right': opt.get('right', ''),
-                            'conId': con_id
-                        }
-                        r = await client.get(f"{settings.WEB_SERVICE_URL}/option/greeks", params=params, headers=headers)
-                        if r.status_code == 200:
-                            market_data[con_id] = r.json()
-                    except Exception as e:
-                        logger.debug(
-                            f"Error fetching greeks for conId={con_id}: {e}")
+                semaphore = asyncio.Semaphore(3)
 
+                async def fetch_greeks(con_id, opt):
+                    async with semaphore:
+                        try:
+                            params = {
+                                'underlying': opt.get('underlying', ''),
+                                'expiry': opt.get('expiry', ''),
+                                'strike': opt.get('strike', 0),
+                                'right': opt.get('right', ''),
+                                'conId': con_id
+                            }
+                            r = await client.get(f"{settings.WEB_SERVICE_URL}/option/greeks", params=params, headers=headers)
+                            if r.status_code == 200:
+                                return (con_id, r.json())
+                        except Exception as e:
+                            logger.debug(
+                                f"Error fetching greeks for conId={con_id}: {e}")
+                        return (con_id, None)
+
+                results = await asyncio.gather(
+                    *[fetch_greeks(cid, opt) for cid, opt in option_map.items()]
+                )
+                for con_id, data in results:
+                    if data is not None:
+                        market_data[con_id] = data
             # --- Evaluate Global Rules (Automated) ---
             # Rule: High Delta Warning — only for SHORT positions (sold options)
             # Collect all triggered alerts, then send a single digest message
@@ -147,13 +157,25 @@ class Monitor:
 
                     strike_fmt = f"{strike:.0f}" if strike == int(strike) else f"{strike}"
                     exp_fmt = expiry.replace("-", "")
-                    display = f"{underlying} {right} {strike_fmt} {exp_fmt}"
+                    display = f"{underlying} {right}{strike_fmt} {exp_fmt}"
+
+                    # Calculate data age in minutes
+                    age_str = ""
+                    last_date_str = data.get('last_date')
+                    if last_date_str:
+                        try:
+                            last_dt = datetime.datetime.strptime(last_date_str, "%Y-%m-%d %H:%M:%S")
+                            age_min = int((datetime.datetime.now() - last_dt).total_seconds() / 60)
+                            age_str = f"({age_min}m)"
+                        except (ValueError, TypeError):
+                            pass
 
                     delta_alerts.append({
                         'con_id': con_id,
                         'display': display,
                         'delta': delta,
-                        'qty': qty
+                        'qty': qty,
+                        'age': age_str
                     })
 
             # Send a single digest if there are any high-delta alerts
@@ -169,15 +191,14 @@ class Monitor:
 
                 lines = [f"⚠️ <b>High Delta Warning — {len(delta_alerts)} Short Position(s)</b>\n"]
                 for a in delta_alerts:
-                    # In automated alerts, all are above threshold, so always
-                    # red
                     marker = "🔴"
                     display_padded = a['display'].ljust(pad)
-                    delta_str = f"{a['delta']:+.3f}".rjust(7)
-                    qty_str = f"({a['qty']:.0f})".rjust(4)
+                    delta_str = f"{a['delta']:+.3f}"
+                    qty_str = f"{a['qty']:.0f}"
+                    age = f", {a['age'].strip('()')}" if a.get('age') else ""
 
                     lines.append(
-                        f"{marker} <code>{display_padded} Δ{delta_str} {qty_str}</code>"
+                        f"{marker} <code>{display_padded} Δ{delta_str}: {qty_str}{age}</code>"
                     )
                 lines.append(f"\n🔴 abs(Δ) &gt; {settings.DELTA_ALERT_THRESHOLD}")
 
@@ -227,7 +248,6 @@ class Monitor:
 
                     # 2. Call API for each option with force_refresh=True
                     # We limit concurrency to avoid overwhelming IBKR Gateway
-                    import asyncio
                     semaphore = asyncio.Semaphore(5)
 
                     async def refresh_one(opt):
