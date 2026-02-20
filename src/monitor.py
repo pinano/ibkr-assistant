@@ -133,7 +133,7 @@ class Monitor:
                 if abs(delta) < 0.0001:
                     continue
 
-                if abs(delta) > settings.ALERT_DELTA_THRESHOLD:
+                if abs(delta) > settings.DELTA_ALERT_THRESHOLD:
                     # Check throttling: skip if alerted < 4 hours ago
                     last_alert = self.global_alert_cache.get(con_id)
                     if last_alert and (
@@ -176,7 +176,7 @@ class Monitor:
                     lines.append(
                         f"{marker} <code>{display_padded} Δ{delta_str} {qty_str}</code>"
                     )
-                lines.append(f"\n🔴 abs(Δ) &gt; {settings.ALERT_DELTA_THRESHOLD}")
+                lines.append(f"\n🔴 abs(Δ) &gt; {settings.DELTA_ALERT_THRESHOLD}")
 
                 await notify_admins("\n".join(lines), parse_mode="HTML")
 

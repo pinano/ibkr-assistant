@@ -1146,7 +1146,7 @@ async def cmd_delta(m: types.Message):
                             'display': display,
                             'delta': delta,
                             'qty': qty,
-                            'high': abs(delta) > settings.ALERT_DELTA_THRESHOLD
+                            'high': abs(delta) > settings.DELTA_ALERT_THRESHOLD
                         })
                 except Exception as e:
                     logger.debug(
@@ -1167,7 +1167,7 @@ async def cmd_delta(m: types.Message):
             high_count = sum(1 for r in results if r['high'])
             header = f"📊 <b>Delta Report — {len(results)} Short Position(s)</b>\n"
             if high_count:
-                header += f"⚠️ <b>{high_count} above threshold ({settings.ALERT_DELTA_THRESHOLD})</b>\n"
+                header += f"⚠️ <b>{high_count} above threshold ({settings.DELTA_ALERT_THRESHOLD})</b>\n"
 
             lines = [header]
             for r in results:
@@ -1180,7 +1180,7 @@ async def cmd_delta(m: types.Message):
                     f"{marker} <code>{display_padded} Δ{delta_str} {qty_str}</code>"
                 )
 
-            lines.append(f"\n🔴 abs(Δ) &gt; {settings.ALERT_DELTA_THRESHOLD}  🟢 abs(Δ) ≤ {settings.ALERT_DELTA_THRESHOLD}")
+            lines.append(f"\n🔴 abs(Δ) &gt; {settings.DELTA_ALERT_THRESHOLD}  🟢 abs(Δ) ≤ {settings.DELTA_ALERT_THRESHOLD}")
 
             await m.answer("\n".join(lines), parse_mode="HTML")
 
@@ -1274,12 +1274,20 @@ async def main():
     )
 
     # 6. Schedule: Alert Monitoring
-    scheduler.add_job(
-        monitor.check_alerts,
-        'interval',
-        seconds=settings.ALERT_CHECK_INTERVAL,
-        id='alert_monitoring'
-    )
+    DELTA_ALERT_TIMES = [t.strip() for t in settings.DELTA_ALERT_TIMES.split(",") if t.strip()]
+    for idx, time_str in enumerate(DELTA_ALERT_TIMES):
+        try:
+            ah, am = map(int, time_str.split(':'))
+            scheduler.add_job(
+                monitor.check_alerts,
+                'cron',
+                day_of_week='mon-fri',
+                hour=ah,
+                minute=am,
+                id=f'alert_monitoring_{idx}'
+            )
+        except ValueError:
+            logger.error(f"Invalid alert time format: {time_str}")
 
     # 7. Schedule: Greeks Cache Refresh (European Hours)
     # Mon-Fri 09:00-18:00 every 15 mins

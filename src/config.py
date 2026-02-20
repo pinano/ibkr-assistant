@@ -24,8 +24,8 @@ class Settings(BaseSettings):
     TELEGRAM_ALLOWED_IDS: str = ""  # Comma separated list of IDs
     CASH_DIFFERENCE_CHECK_INTERVAL: int = 300
     DB_INSERT_INTERVAL: int = 1800
-    ALERT_CHECK_INTERVAL: int = 300
-    ALERT_DELTA_THRESHOLD: float = 0.25
+    DELTA_ALERT_TIMES: str = "10:00,16:00,22:30"
+    DELTA_ALERT_THRESHOLD: float = 0.25
 
     @property
     def WEB_SERVICE_URL(self) -> str:
