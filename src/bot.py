@@ -1133,7 +1133,6 @@ async def cmd_delta(m: types.Message):
 
                         strike_fmt = f"{strike:.0f}" if strike == int(strike) else f"{strike}"
                         exp_fmt = expiry.replace("-", "")
-                        display = f"{underlying} {right}{strike_fmt} {exp_fmt}"
 
                         # Calculate data age in minutes
                         age_str = ""
@@ -1142,14 +1141,16 @@ async def cmd_delta(m: types.Message):
                             try:
                                 last_dt = datetime.strptime(last_date_str, "%Y-%m-%d %H:%M:%S")
                                 age_min = int((datetime.now() - last_dt).total_seconds() / 60)
-                                age_str = f"({age_min}m)"
+                                age_str = f"{age_min}m"
                             except (ValueError, TypeError):
                                 pass
 
                         results.append({
-                            'display': display,
+                            'underlying': underlying,
+                            'right_strike': f"{right}{strike_fmt}",
+                            'expiry': exp_fmt,
                             'delta': delta,
-                            'qty': qty,
+                            'qty': abs(qty),
                             'high': abs(delta) > settings.DELTA_ALERT_THRESHOLD,
                             'age': age_str
                         })
@@ -1164,9 +1165,10 @@ async def cmd_delta(m: types.Message):
             # Sort by absolute delta descending
             results.sort(key=lambda x: abs(x['delta']), reverse=True)
 
-            # Calculate max display width for alignment
-            max_display = max(len(r['display']) for r in results)
-            pad = max(max_display, 18)  # minimum 18 chars
+            # Calculate max widths for alignment
+            max_qty = max(len(f"{r['qty']:.0f}") for r in results)
+            max_und = max(len(r['underlying']) for r in results)
+            max_rs = max(len(r['right_strike']) for r in results)
 
             # Build digest message
             high_count = sum(1 for r in results if r['high'])
@@ -1177,13 +1179,14 @@ async def cmd_delta(m: types.Message):
             lines = [header]
             for r in results:
                 marker = "🔴" if r['high'] else "🟢"
-                display_padded = r['display'].ljust(pad)
+                qty_str = f"{r['qty']:.0f}".rjust(max_qty)
+                und_padded = r['underlying'].ljust(max_und)
+                rs_padded = r['right_strike'].ljust(max_rs)
                 delta_str = f"{r['delta']:+.3f}"
-                qty_str = f"{r['qty']:.0f}"
-                age = f", {r['age'].strip('()')}" if r.get('age') else ""
+                age = r['age']
 
                 lines.append(
-                    f"{marker} <code>{display_padded} Δ{delta_str}: {qty_str}{age}</code>"
+                    f"{marker} <code>{qty_str} {und_padded} {rs_padded} {r['expiry']} Δ{delta_str} {age}</code>".strip()
                 )
 
             lines.append(f"\n🔴 abs(Δ) &gt; {settings.DELTA_ALERT_THRESHOLD}  🟢 abs(Δ) ≤ {settings.DELTA_ALERT_THRESHOLD}")

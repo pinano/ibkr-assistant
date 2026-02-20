@@ -157,7 +157,6 @@ class Monitor:
 
                     strike_fmt = f"{strike:.0f}" if strike == int(strike) else f"{strike}"
                     exp_fmt = expiry.replace("-", "")
-                    display = f"{underlying} {right}{strike_fmt} {exp_fmt}"
 
                     # Calculate data age in minutes
                     age_str = ""
@@ -166,15 +165,17 @@ class Monitor:
                         try:
                             last_dt = datetime.datetime.strptime(last_date_str, "%Y-%m-%d %H:%M:%S")
                             age_min = int((datetime.datetime.now() - last_dt).total_seconds() / 60)
-                            age_str = f"({age_min}m)"
+                            age_str = f"{age_min}m"
                         except (ValueError, TypeError):
                             pass
 
                     delta_alerts.append({
                         'con_id': con_id,
-                        'display': display,
+                        'underlying': underlying,
+                        'right_strike': f"{right}{strike_fmt}",
+                        'expiry': exp_fmt,
                         'delta': delta,
-                        'qty': qty,
+                        'qty': abs(qty),
                         'age': age_str
                     })
 
@@ -185,20 +186,22 @@ class Monitor:
                 
                 logger.info(f"Global Delta Alert: {len(delta_alerts)} contract(s) above threshold")
 
-                # Calculate max display width for alignment
-                max_display = max(len(r['display']) for r in delta_alerts)
-                pad = max(max_display, 18)
+                # Calculate max widths for alignment
+                max_qty = max(len(f"{a['qty']:.0f}") for a in delta_alerts)
+                max_und = max(len(a['underlying']) for a in delta_alerts)
+                max_rs = max(len(a['right_strike']) for a in delta_alerts)
 
                 lines = [f"⚠️ <b>High Delta Warning — {len(delta_alerts)} Short Position(s)</b>\n"]
                 for a in delta_alerts:
                     marker = "🔴"
-                    display_padded = a['display'].ljust(pad)
+                    qty_str = f"{a['qty']:.0f}".rjust(max_qty)
+                    und_padded = a['underlying'].ljust(max_und)
+                    rs_padded = a['right_strike'].ljust(max_rs)
                     delta_str = f"{a['delta']:+.3f}"
-                    qty_str = f"{a['qty']:.0f}"
-                    age = f", {a['age'].strip('()')}" if a.get('age') else ""
+                    age = a['age']
 
                     lines.append(
-                        f"{marker} <code>{display_padded} Δ{delta_str}: {qty_str}{age}</code>"
+                        f"{marker} <code>{qty_str} {und_padded} {rs_padded} {a['expiry']} Δ{delta_str} {age}</code>".strip()
                     )
                 lines.append(f"\n🔴 abs(Δ) &gt; {settings.DELTA_ALERT_THRESHOLD}")
 
