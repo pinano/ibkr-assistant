@@ -199,6 +199,22 @@ function _fetchFromIBKR(ticker, expDate, type, formattedStrike) {
             return null; // API URL not configured
         }
 
+        // Generate cache key
+        const cacheKey = 'ibkr_' + ticker + '_' + expDate + '_' + type + '_' + formattedStrike;
+        const cache = CacheService.getScriptCache();
+        const cached = cache.get(cacheKey);
+
+        if (cached) {
+            if (cached === 'null') return null;
+            
+            const parsed = JSON.parse(cached);
+            // Restore Date object from JSON string (index 7 is lastDate)
+            if (parsed && parsed.length > 7 && parsed[7]) {
+                parsed[7] = new Date(parsed[7]);
+            }
+            return parsed;
+        }
+
         // Convert expDate YYMMDD -> YYYYMMDD
         const year = '20' + expDate.substring(0, 2);
         const month = expDate.substring(2, 4);
@@ -230,6 +246,7 @@ function _fetchFromIBKR(ticker, expDate, type, formattedStrike) {
         });
 
         if (response.getResponseCode() !== 200) {
+            try { cache.put(cacheKey, 'null', 60); } catch(e) {}
             return null;
         }
 
@@ -237,6 +254,7 @@ function _fetchFromIBKR(ticker, expDate, type, formattedStrike) {
         try {
             data = JSON.parse(response.getContentText());
         } catch (e) {
+            try { cache.put(cacheKey, 'null', 60); } catch(err) {}
             return null; // Invalid JSON
         }
 
@@ -254,7 +272,7 @@ function _fetchFromIBKR(ticker, expDate, type, formattedStrike) {
 
         // Map the IBKR response to the same column order as CBOE:
         // [delta, gamma, theta, vega, iv, open_interest, volume, last_trade_price, last_trade_time]
-        return [
+        const result = [
             Math.abs(data.delta || 0),       // delta (absolute value, same as CBOE)
             data.gamma || 0,                  // gamma
             Math.abs(data.theta || 0),        // theta (absolute value)
@@ -265,6 +283,14 @@ function _fetchFromIBKR(ticker, expDate, type, formattedStrike) {
             data.last_price || 0,             // last_trade_price
             lastDate                          // last_trade_time
         ];
+
+        try {
+            cache.put(cacheKey, JSON.stringify(result), CBOE_CACHE_TTL);
+        } catch (e) {
+            // Ignore cache size errors
+        }
+
+        return result;
 
     } catch (e) {
         return null;
