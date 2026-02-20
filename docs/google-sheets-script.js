@@ -6,7 +6,7 @@ const IBKR_API_KEY = 'API_KEY'; // <-- Set your API_KEY here
 // CacheService persists across custom function invocations (up to 6 hours).
 // A global `const` object does NOT persist because each custom function call
 // runs in a fresh execution context in Google Apps Script.
-const CBOE_CACHE_TTL = 300; // seconds (5 minutes)
+const CACHE_TTL = 300; // seconds (5 minutes)
 const IBKR_API_TIMEOUT = 25; // seconds (API has internal 20s timeout)
 
 /**
@@ -145,7 +145,7 @@ function _fetchFromCBOE(ticker, expDate, type, formattedStrike) {
             // Cache the full JSON. CacheService has a 100KB limit per key.
             // For very large chains, this may fail silently — that's OK, we just skip caching.
             try {
-                cache.put(cacheKey, response.getContentText(), CBOE_CACHE_TTL);
+                cache.put(cacheKey, response.getContentText(), CACHE_TTL);
             } catch (e) {
                 // Value too large for cache — ignore
             }
@@ -206,7 +206,7 @@ function _fetchFromIBKR(ticker, expDate, type, formattedStrike) {
 
         if (cached) {
             if (cached === 'null') return null;
-            
+
             const parsed = JSON.parse(cached);
             // Restore Date object from JSON string (index 7 is lastDate)
             if (parsed && parsed.length > 7 && parsed[7]) {
@@ -246,7 +246,7 @@ function _fetchFromIBKR(ticker, expDate, type, formattedStrike) {
         });
 
         if (response.getResponseCode() !== 200) {
-            try { cache.put(cacheKey, 'null', 60); } catch(e) {}
+            try { cache.put(cacheKey, 'null', 60); } catch (e) { }
             return null;
         }
 
@@ -254,7 +254,7 @@ function _fetchFromIBKR(ticker, expDate, type, formattedStrike) {
         try {
             data = JSON.parse(response.getContentText());
         } catch (e) {
-            try { cache.put(cacheKey, 'null', 60); } catch(err) {}
+            try { cache.put(cacheKey, 'null', 60); } catch (err) { }
             return null; // Invalid JSON
         }
 
@@ -285,7 +285,7 @@ function _fetchFromIBKR(ticker, expDate, type, formattedStrike) {
         ];
 
         try {
-            cache.put(cacheKey, JSON.stringify(result), CBOE_CACHE_TTL);
+            cache.put(cacheKey, JSON.stringify(result), CACHE_TTL);
         } catch (e) {
             // Ignore cache size errors
         }
