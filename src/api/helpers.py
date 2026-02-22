@@ -146,3 +146,13 @@ def _is_eu_market_open():
         return True
     except Exception:
         return True  # Assume open if timezone fails
+
+
+def _is_market_open():
+    """Return True if within global market hours (Mon-Fri, 09:00-22:00 container local time)."""
+    now = datetime.now()
+    if now.weekday() >= 5:  # Weekend
+        return False
+    if now.hour < 9 or now.hour >= 22:
+        return False
+    return True

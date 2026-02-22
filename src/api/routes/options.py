@@ -18,6 +18,7 @@ from src.api.helpers import (
     _greeks_are_valid,
     _snap_is_valid,
     _is_eu_market_open,
+    _is_market_open,
 )
 from src.models import OptionGreeks, OptionSnapshot, OptionChainItem
 
@@ -113,22 +114,27 @@ async def get_option_greeks(
             else:
                 is_likely_us = '.' not in underlying or underlying in ['SPX', 'VIX', 'NDX', 'RUT']
             is_eu_closed = not is_likely_us and not _is_eu_market_open()
+            is_market_closed = not _is_market_open()
 
             is_valid = _snap_is_valid(snap)
             is_fresh = snap and snap.updated_at > datetime.now() - timedelta(minutes=60)
 
             use_cache = False
-            if snap and not force_refresh:
-                if is_valid and is_fresh:
+            if snap:
+                if is_market_closed:
                     use_cache = True
-                elif is_valid and is_eu_closed:
-                    use_cache = True
-                    logger.info(f"EU Market Closed: Serving extended cache for {underlying}")
-                elif is_eu_closed and is_fresh:
-                    # EU closed + freshly cached frozen data (Greeks may be zero but it's
-                    # the best we have until the market reopens)
-                    use_cache = True
-                    logger.info(f"EU Market Closed: Serving fresh frozen cache for {underlying}")
+                    logger.info(f"Global Market Closed: Serving cached data for {underlying}")
+                elif not force_refresh:
+                    if is_valid and is_fresh:
+                        use_cache = True
+                    elif is_valid and is_eu_closed:
+                        use_cache = True
+                        logger.info(f"EU Market Closed: Serving extended cache for {underlying}")
+                    elif is_eu_closed and is_fresh:
+                        # EU closed + freshly cached frozen data (Greeks may be zero but it's
+                        # the best we have until the market reopens)
+                        use_cache = True
+                        logger.info(f"EU Market Closed: Serving fresh frozen cache for {underlying}")
 
             if use_cache:
                 logger.info(f"Serving cached greeks for conId={conId}")
