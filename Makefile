@@ -17,6 +17,7 @@ help:
 	@echo "  make logs      Tail logs from all containers"
 	@echo "  make status    Show container status"
 	@echo "  make db        Open MariaDB console"
+	@echo "  make ctop      View container metrics with ctop"
 	@echo ""
 
 init:
@@ -48,3 +49,11 @@ status:
 
 db:
 	$(COMPOSE) exec ibkr-db sh -c 'mariadb -u root -p"$$MARIADB_ROOT_PASSWORD" "$$MARIADB_DATABASE"'
+
+.PHONY: ctop
+ctop:
+	@PROJECT_NAME=$$(grep '^PROJECT_NAME=' .env | cut -d= -f2 | head -1); \
+	docker run --rm -ti \
+		--name=ctop \
+		--volume /var/run/docker.sock:/var/run/docker.sock:ro \
+		quay.io/vektorlab/ctop:latest -f "$$PROJECT_NAME"
