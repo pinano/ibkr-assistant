@@ -1107,12 +1107,24 @@ async def cmd_delta(m: types.Message):
                 con_id = opt.get('conId', 0)
                 if not con_id:
                     continue
+
+                underlying = opt.get('underlying', '??')
+                right = opt.get('right', '?')
+                strike = opt.get('strike', 0)
+                expiry = opt.get('expiry', '')
+                qty = opt.get('qty', 0)
+                strike_fmt = f"{strike:.0f}" if strike == int(strike) else f"{strike}"
+                exp_fmt = expiry.replace("-", "")
+
+                delta = None
+                age_str = ""
+
                 try:
                     params = {
-                        'underlying': opt.get('underlying', ''),
-                        'expiry': opt.get('expiry', ''),
-                        'strike': opt.get('strike', 0),
-                        'right': opt.get('right', ''),
+                        'underlying': underlying,
+                        'expiry': expiry,
+                        'strike': strike,
+                        'right': right,
                         'conId': con_id
                     }
                     r = await client.get(
@@ -1121,21 +1133,11 @@ async def cmd_delta(m: types.Message):
                     )
                     if r.status_code == 200:
                         data = r.json()
-                        delta = data.get('delta', 0.0)
-                        if abs(delta) < 0.0001:
-                            continue
-
-                        underlying = opt.get('underlying', '??')
-                        right = opt.get('right', '?')
-                        strike = opt.get('strike', 0)
-                        expiry = opt.get('expiry', '')
-                        qty = opt.get('qty', 0)
-
-                        strike_fmt = f"{strike:.0f}" if strike == int(strike) else f"{strike}"
-                        exp_fmt = expiry.replace("-", "")
+                        raw_delta = data.get('delta', 0.0)
+                        if abs(raw_delta) >= 0.0001:
+                            delta = raw_delta
 
                         # Calculate data age in minutes
-                        age_str = ""
                         last_date_str = data.get('last_date')
                         if last_date_str:
                             try:
@@ -1144,26 +1146,26 @@ async def cmd_delta(m: types.Message):
                                 age_str = f"{age_min}m"
                             except (ValueError, TypeError):
                                 pass
-
-                        results.append({
-                            'underlying': underlying,
-                            'right_strike': f"{right}{strike_fmt}",
-                            'expiry': exp_fmt,
-                            'delta': delta,
-                            'qty': abs(qty),
-                            'high': abs(delta) > settings.DELTA_ALERT_THRESHOLD,
-                            'age': age_str
-                        })
                 except Exception as e:
                     logger.debug(
                         f"Error fetching greeks for conId={con_id}: {e}")
 
+                results.append({
+                    'underlying': underlying,
+                    'right_strike': f"{right}{strike_fmt}",
+                    'expiry': exp_fmt,
+                    'delta': delta,
+                    'qty': abs(qty),
+                    'high': delta is not None and abs(delta) > settings.DELTA_ALERT_THRESHOLD,
+                    'age': age_str
+                })
+
             if not results:
-                await m.answer("✅ No delta data available for short positions.")
+                await m.answer("✅ No short option positions found.")
                 return
 
-            # Sort by absolute delta descending
-            results.sort(key=lambda x: abs(x['delta']), reverse=True)
+            # Sort: contracts with delta first (by abs desc), then None deltas at the bottom
+            results.sort(key=lambda x: (x['delta'] is None, -abs(x['delta']) if x['delta'] is not None else 0))
 
             # Calculate max widths for alignment
             max_qty = max(len(f"{r['qty']:.0f}") for r in results)
@@ -1172,24 +1174,31 @@ async def cmd_delta(m: types.Message):
 
             # Build digest message
             high_count = sum(1 for r in results if r['high'])
+            no_data_count = sum(1 for r in results if r['delta'] is None)
             header = f"📊 <b>Delta Report — {len(results)} Short Position(s)</b>\n"
             if high_count:
                 header += f"⚠️ <b>{high_count} above threshold ({settings.DELTA_ALERT_THRESHOLD})</b>\n"
+            if no_data_count:
+                header += f"⚪ <b>{no_data_count} without delta data</b>\n"
 
             lines = [header]
             for r in results:
-                marker = "🔴" if r['high'] else "🟢"
+                if r['delta'] is None:
+                    marker = "⚪"
+                    delta_str = "  —  "
+                else:
+                    marker = "🔴" if r['high'] else "🟢"
+                    delta_str = f"{r['delta']:+.3f}"
                 qty_str = f"{r['qty']:.0f}".rjust(max_qty)
                 und_padded = r['underlying'].ljust(max_und)
                 rs_padded = r['right_strike'].ljust(max_rs)
-                delta_str = f"{r['delta']:+.3f}"
                 age = r['age']
 
                 lines.append(
                     f"{marker} <code>{qty_str} {und_padded} {rs_padded} {r['expiry']} Δ{delta_str} {age}</code>".strip()
                 )
 
-            lines.append(f"\n🔴 abs(Δ) &gt; {settings.DELTA_ALERT_THRESHOLD}  🟢 abs(Δ) ≤ {settings.DELTA_ALERT_THRESHOLD}")
+            lines.append(f"\n🔴 abs(Δ) &gt; {settings.DELTA_ALERT_THRESHOLD}  🟢 abs(Δ) ≤ {settings.DELTA_ALERT_THRESHOLD}  ⚪ no data")
 
             await m.answer("\n".join(lines), parse_mode="HTML")
 
