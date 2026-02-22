@@ -56,4 +56,4 @@ ctop:
 	docker run --rm -ti \
 		--name=ctop \
 		--volume /var/run/docker.sock:/var/run/docker.sock:ro \
-		elstwork/ctop:latest -f "$$PROJECT_NAME"
+		elswork/ctop:latest -f "$$PROJECT_NAME"
