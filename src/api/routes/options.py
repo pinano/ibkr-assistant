@@ -17,7 +17,6 @@ from src.api.helpers import (
     _fetch_cboe_greeks,
     _greeks_are_valid,
     _snap_is_valid,
-    _is_eu_market_open,
     _is_market_open,
 )
 from src.models import OptionGreeks, OptionSnapshot, OptionChainItem
@@ -102,57 +101,49 @@ async def get_option_greeks(
                 logger.debug(
                     "Could not resolve conId via positions (Gateway down)")
 
-        # 2. Check Cache
-        if conId or snap:
-            if not snap:
-                snap = db.query(OptionSnapshot).filter(
-                    OptionSnapshot.conId == conId
-                ).order_by(OptionSnapshot.updated_at.desc()).first()
+        # ------------------------------------------------------------------
+        # Cache decision — single unified rule:
+        #
+        #   Market OPEN  (Mon-Fri 09:00-23:00 local):
+        #       Serve from DB if snap exists AND is < 60 min old.
+        #       Otherwise fall through to CBOE / IBKR.
+        #
+        #   Market CLOSED (weekends or outside 09:00-23:00):
+        #       Always serve from DB if ANY snap exists, regardless of age.
+        #       Only fall through to CBOE / IBKR when no record exists at all.
+        # ------------------------------------------------------------------
+        market_open = _is_market_open()
+        use_cache = False
 
-            if prefix_exchange:
-                is_likely_us = False
-            else:
-                is_likely_us = '.' not in underlying or underlying in ['SPX', 'VIX', 'NDX', 'RUT']
-            is_eu_closed = not is_likely_us and not _is_eu_market_open()
-            is_market_closed = not _is_market_open()
-
-            is_valid = _snap_is_valid(snap)
-            is_fresh = snap and snap.updated_at > datetime.now() - timedelta(minutes=60)
-
-            use_cache = False
-            if snap:
-                if is_market_closed:
+        if snap:
+            if market_open:
+                # Normal trading hours: use cache only if fresh (< 60 min)
+                is_fresh = snap.updated_at and snap.updated_at > datetime.now() - timedelta(minutes=60)
+                if is_fresh and not force_refresh:
+                    logger.info(f"Market open: serving fresh cache for {underlying} (age < 60 min)")
                     use_cache = True
-                    logger.info(f"Global Market Closed: Serving cached data for {underlying}")
-                elif not force_refresh:
-                    if is_valid and is_fresh:
-                        use_cache = True
-                    elif is_valid and is_eu_closed:
-                        use_cache = True
-                        logger.info(f"EU Market Closed: Serving extended cache for {underlying}")
-                    elif is_eu_closed and is_fresh:
-                        # EU closed + freshly cached frozen data (Greeks may be zero but it's
-                        # the best we have until the market reopens)
-                        use_cache = True
-                        logger.info(f"EU Market Closed: Serving fresh frozen cache for {underlying}")
+            else:
+                # Market closed: serve whatever is in DB, no matter how old
+                if not force_refresh:
+                    logger.info(f"Market closed: serving cached data for {underlying} (age irrelevant)")
+                    use_cache = True
 
-            if use_cache:
-                logger.info(f"Serving cached greeks for conId={conId}")
-                return OptionGreeks(
-                    symbol=snap.symbol,
-                    delta=snap.delta or 0.0,
-                    gamma=snap.gamma or 0.0,
-                    vega=snap.vega or 0.0,
-                    theta=snap.theta or 0.0,
-                    implied_vol=snap.implied_vol or 0.0,
-                    underlying_price=snap.underlying_price or 0.0,
-                    last_price=snap.last_price or 0.0,
-                    volume=0,
-                    open_interest=0,
-                    last_date=snap.updated_at.strftime("%Y-%m-%d %H:%M:%S") if snap.updated_at else None
-                )
-            elif not force_refresh and snap and is_fresh and not is_valid and not is_eu_closed:
-                logger.warning(f"Cached data for conId={conId} has invalid Greeks, forcing live fetch")
+        if use_cache:
+            logger.info(f"Serving cached greeks for conId={conId}")
+            return OptionGreeks(
+                symbol=snap.symbol,
+                delta=snap.delta or 0.0,
+                gamma=snap.gamma or 0.0,
+                vega=snap.vega or 0.0,
+                theta=snap.theta or 0.0,
+                implied_vol=snap.implied_vol or 0.0,
+                underlying_price=snap.underlying_price or 0.0,
+                last_price=snap.last_price or 0.0,
+                volume=0,
+                open_interest=0,
+                last_date=snap.updated_at.strftime("%Y-%m-%d %H:%M:%S") if snap.updated_at else None
+            )
+
 
         # 2b. Check CBOE (for US options)
         if prefix_exchange:

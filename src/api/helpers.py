@@ -6,11 +6,6 @@ from datetime import datetime
 from src.api.constants import MARKET_SUFFIXES
 from src.models import OptionGreeks
 
-try:
-    from zoneinfo import ZoneInfo
-except ImportError:
-    from backports.zoneinfo import ZoneInfo
-
 logger = logging.getLogger("ibkr-api")
 
 
@@ -135,24 +130,16 @@ def _snap_is_valid(snap):
     return True
 
 
-def _is_eu_market_open():
-    """Return True if within EU market hours (Mon-Fri, 09:00-18:00)."""
-    try:
-        now = datetime.now(ZoneInfo("Europe/Paris"))
-        if now.weekday() >= 5:  # Weekend
-            return False
-        if now.hour < 9 or now.hour >= 18:
-            return False
-        return True
-    except Exception:
-        return True  # Assume open if timezone fails
-
-
 def _is_market_open():
-    """Return True if within global market hours (Mon-Fri, 09:00-22:00 container local time)."""
+    """
+    Return True if markets are considered active.
+    Active hours: Monday-Friday, 09:00-23:00 container local time.
+    Outside this window the system serves cached data from DB without
+    hitting external sources (CBOE / IBKR) unless a record is missing.
+    """
     now = datetime.now()
     if now.weekday() >= 5:  # Weekend
         return False
-    if now.hour < 9 or now.hour >= 22:
+    if now.hour < 9 or now.hour >= 23:
         return False
     return True
