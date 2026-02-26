@@ -348,7 +348,7 @@ async def get_option_greeks(
             is_likely_us_for_save = False
         else:
             is_likely_us_for_save = '.' not in underlying or underlying in ['SPX', 'VIX', 'NDX', 'RUT']
-        eu_closed = not is_likely_us_for_save and not _is_eu_market_open()
+        eu_closed = not is_likely_us_for_save and not _is_market_open()
 
         should_save = False
         if qualified and qualified[0]:
