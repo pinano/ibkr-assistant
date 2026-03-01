@@ -312,12 +312,12 @@ function _fetchFromIBKR(ticker, expDate, type, formattedStrike) {
 function GETFXRATE(pair) {
     try {
         if (!IBKR_API_KEY || IBKR_API_KEY === 'API_KEY') {
-            return 'Error: API key not configured.';
+            throw new Error('API key not configured.');
         }
 
         const cleanPair = String(pair).replace(/[^A-Z]/ig, "").toUpperCase();
         if (cleanPair.length !== 6) {
-            return 'Error: Invalid pair format. Use "EURUSD".';
+            throw new Error('Invalid pair format. Use "EURUSD".');
         }
 
         // Check cache first
@@ -326,7 +326,7 @@ function GETFXRATE(pair) {
         const cached = cache.get(cacheKey);
         if (cached) {
             const val = parseFloat(cached);
-            return isNaN(val) ? cached : val; // Return number if valid, error string otherwise
+            if (!isNaN(val) && val > 0) return val;
         }
 
         const url = IBKR_API_URL + '/market/snapshot/' + cleanPair;
@@ -345,24 +345,25 @@ function GETFXRATE(pair) {
             } catch (e) {
                 errorMsg = 'API Error (' + response.getResponseCode() + ')';
             }
-            return 'Error: ' + errorMsg;
+            throw new Error(errorMsg);
         }
 
         let data;
         try {
             data = JSON.parse(response.getContentText());
         } catch (e) {
-            return 'Error: Invalid JSON response from API';
+            throw new Error('Invalid JSON response from API');
         }
 
-        if (data.price !== null && data.price !== undefined) {
+        if (data.price !== null && data.price !== undefined && data.price > 0) {
             try { cache.put(cacheKey, String(data.price), CACHE_TTL); } catch (e) { }
             return data.price;
         }
-        return 'Error: No price data available';
+        throw new Error('No valid price data available');
 
     } catch (e) {
-        return 'Error: ' + e.message;
+        // We throw the error so Google Sheets' IFERROR can catch it
+        throw e;
     }
 }
 

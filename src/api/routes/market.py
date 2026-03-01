@@ -102,10 +102,10 @@ async def get_market_snapshot(symbol: str, db: Session = Depends(get_db)):
                 )
             raise HTTPException(status_code=503, detail="Market data temporarily unavailable")
 
-        v_last = t.last if (t.last is not None and not math.isnan(t.last)) else None
-        v_bid = t.bid if (t.bid is not None and not math.isnan(t.bid)) else None
-        v_ask = t.ask if (t.ask is not None and not math.isnan(t.ask)) else None
-        v_close = t.close if (t.close is not None and not math.isnan(t.close)) else None
+        v_last = t.last if (t.last is not None and not math.isnan(t.last) and t.last > 0) else None
+        v_bid = t.bid if (t.bid is not None and not math.isnan(t.bid) and t.bid > 0) else None
+        v_ask = t.ask if (t.ask is not None and not math.isnan(t.ask) and t.ask > 0) else None
+        v_close = t.close if (t.close is not None and not math.isnan(t.close) and t.close > 0) else None
 
         # For FX (CASH) contracts, `last` is always NaN — only bid/ask exist.
         # reqTickersAsync may return before bid/ask have arrived, so wait briefly.
@@ -114,12 +114,12 @@ async def get_market_snapshot(symbol: str, db: Session = Depends(get_db)):
                 await asyncio.sleep(0.1)
                 client.sleep(0)  # process IB events
                 t = tickers[0]
-                v_bid = t.bid if (t.bid is not None and not math.isnan(t.bid)) else None
-                v_ask = t.ask if (t.ask is not None and not math.isnan(t.ask)) else None
-                v_last = t.last if (t.last is not None and not math.isnan(t.last)) else None
+                v_bid = t.bid if (t.bid is not None and not math.isnan(t.bid) and t.bid > 0) else None
+                v_ask = t.ask if (t.ask is not None and not math.isnan(t.ask) and t.ask > 0) else None
+                v_last = t.last if (t.last is not None and not math.isnan(t.last) and t.last > 0) else None
                 if v_bid is not None or v_ask is not None or v_last is not None:
                     break
-            v_close = t.close if (t.close is not None and not math.isnan(t.close)) else None
+            v_close = t.close if (t.close is not None and not math.isnan(t.close) and t.close > 0) else None
 
         price = v_last
         if price is None:
@@ -128,12 +128,12 @@ async def get_market_snapshot(symbol: str, db: Session = Depends(get_db)):
             elif v_close:
                 price = v_close
             else:
-                price = v_bid or v_ask or 0.0
+                price = v_bid or v_ask or -1.0
 
         logger.info(f"Snapshot for {symbol}: price={price}, bid={v_bid}, ask={v_ask} (live)")
 
         # 3. Update Cache — but only if we got a real price
-        if price and price > 0:
+        if price is not None and price > 0:
             if not cache:
                 cache = MarketCache(symbol=symbol)
                 db.add(cache)
@@ -144,7 +144,16 @@ async def get_market_snapshot(symbol: str, db: Session = Depends(get_db)):
             cache.updated_at = datetime.now()
             db.commit()
         else:
-            logger.warning(f"Not caching zero price for {symbol}")
+            logger.warning(f"Not caching zero/negative price for {symbol}")
+            if cache and cache.price and cache.price > 0:
+                logger.info(f"Returning STALE cache for {symbol} because live price is {price}")
+                return MarketSnapshot(
+                    symbol=symbol,
+                    price=cache.price,
+                    bid=cache.bid,
+                    ask=cache.ask,
+                    timestamp=cache.updated_at
+                )
 
         return MarketSnapshot(
             symbol=symbol,
