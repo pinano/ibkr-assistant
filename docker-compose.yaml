@@ -28,7 +28,7 @@ services:
       - ibkr
 
   ibkr-db:
-    image: mariadb:latest
+    image: mariadb:12.1.2
     restart: always
     container_name: ${PROJECT_ID}-db
     command: --default-time-zone=${TZ}
