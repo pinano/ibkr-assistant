@@ -101,6 +101,8 @@ The project uses a `Makefile` for lifecycle management:
 
 | `/max` | All-Time High NAV vs current drawdown |
 | `/today` | Today's NAV Min / Max / Current |
+| `/week` | Weekly NAV analysis (Min, Max, Var%) |
+| `/month` | Monthly NAV analysis (Min, Max, Var%) |
 | `/year [YYYY]` | Yearly NAV analysis (Min, Max, Var%) |
 | `/delta` | On-demand delta check for short option positions (Calls+, Puts-) |
 | `/flex` | Manually trigger daily Flex Query report |

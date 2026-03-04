@@ -52,6 +52,11 @@ def get_now() -> datetime:
         return datetime.now()
 
 
+def format_nav_date(dt: datetime, now_dt: datetime) -> str:
+    """Format date to HH:MM if today, else DD/MM HH:MM."""
+    if dt.date() == now_dt.date():
+        return dt.strftime("%H:%M")
+    return dt.strftime("%d/%m %H:%M")
 
 async def notify_admins(text: str, parse_mode: str = "Markdown"):
     for chat_id in settings.allowed_ids_list:
@@ -632,33 +637,30 @@ async def cmd_year(m: types.Message):
                     return
 
                 # Calculate Start
+                now = get_now()
                 start_nav = float(first_rec.nav) if first_rec else curr_val
-                start_date = first_rec.date.strftime(
-                    "%d/%m %H:%M") if first_rec else "Now"
+                start_date = format_nav_date(first_rec.date, now) if first_rec else "Now"
 
                 # Calculate End
                 is_now = False
-                if target_year == get_now().year and curr_val is not None:
+                if target_year == now.year and curr_val is not None:
                     end_nav = curr_val
                     end_date = "Now"
                     is_now = True
                 else:
                     end_nav = float(
                         last_db_rec.nav) if last_db_rec else start_nav
-                    end_date = last_db_rec.date.strftime(
-                        "%d/%m %H:%M") if last_db_rec else start_date
+                    end_date = format_nav_date(last_db_rec.date, now) if last_db_rec else start_date
 
                 period_var = ((end_nav - start_nav) /
                               start_nav * 100) if start_nav else 0
 
                 # Calculate Min/Max (including current if applicable)
                 min_val = float(min_rec.nav) if min_rec else curr_val
-                min_date = min_rec.date.strftime(
-                    "%d/%m %H:%M") if min_rec else "Now"
+                min_date = format_nav_date(min_rec.date, now) if min_rec else "Now"
 
                 max_val = float(max_rec.nav) if max_rec else curr_val
-                max_date = max_rec.date.strftime(
-                    "%d/%m %H:%M") if max_rec else "Now"
+                max_date = format_nav_date(max_rec.date, now) if max_rec else "Now"
 
                 if target_year == get_now().year and curr_val is not None:
                     if curr_val < min_val:
@@ -746,19 +748,19 @@ async def cmd_month(m: types.Message):
                     return
 
                 start_nav = float(first_rec.nav) if first_rec else curr_val
-                start_date = first_rec.date.strftime("%d/%m %H:%M") if first_rec else "Now"
+                start_date = format_nav_date(first_rec.date, now) if first_rec else "Now"
 
                 end_nav = curr_val if curr_val is not None else (float(last_db_rec.nav) if last_db_rec else start_nav)
-                end_date = "Now" if curr_val is not None else (last_db_rec.date.strftime("%d/%m %H:%M") if last_db_rec else start_date)
+                end_date = "Now" if curr_val is not None else (format_nav_date(last_db_rec.date, now) if last_db_rec else start_date)
                 is_now = curr_val is not None
 
                 period_var = ((end_nav - start_nav) / start_nav * 100) if start_nav else 0
 
                 min_val = float(min_rec.nav) if min_rec else curr_val
-                min_date = min_rec.date.strftime("%d/%m %H:%M") if min_rec else "Now"
+                min_date = format_nav_date(min_rec.date, now) if min_rec else "Now"
 
                 max_val = float(max_rec.nav) if max_rec else curr_val
-                max_date = max_rec.date.strftime("%d/%m %H:%M") if max_rec else "Now"
+                max_date = format_nav_date(max_rec.date, now) if max_rec else "Now"
 
                 if curr_val is not None:
                     if curr_val < min_val:
@@ -841,19 +843,19 @@ async def cmd_week(m: types.Message):
                     return
 
                 start_nav = float(first_rec.nav) if first_rec else curr_val
-                start_date = first_rec.date.strftime("%d/%m %H:%M") if first_rec else "Now"
+                start_date = format_nav_date(first_rec.date, now) if first_rec else "Now"
 
                 end_nav = curr_val if curr_val is not None else (float(last_db_rec.nav) if last_db_rec else start_nav)
-                end_date = "Now" if curr_val is not None else (last_db_rec.date.strftime("%d/%m %H:%M") if last_db_rec else start_date)
+                end_date = "Now" if curr_val is not None else (format_nav_date(last_db_rec.date, now) if last_db_rec else start_date)
                 is_now = curr_val is not None
 
                 period_var = ((end_nav - start_nav) / start_nav * 100) if start_nav else 0
 
                 min_val = float(min_rec.nav) if min_rec else curr_val
-                min_date = min_rec.date.strftime("%d/%m %H:%M") if min_rec else "Now"
+                min_date = format_nav_date(min_rec.date, now) if min_rec else "Now"
 
                 max_val = float(max_rec.nav) if max_rec else curr_val
-                max_date = max_rec.date.strftime("%d/%m %H:%M") if max_rec else "Now"
+                max_date = format_nav_date(max_rec.date, now) if max_rec else "Now"
 
                 if curr_val is not None:
                     if curr_val < min_val:
