@@ -130,6 +130,8 @@ async def get_option_greeks(
 
         if use_cache:
             logger.info(f"Serving cached greeks for conId={conId}")
+            # Prefer last_trade_date (actual trade time); fall back to updated_at for old rows
+            effective_date = snap.last_trade_date or snap.updated_at
             return OptionGreeks(
                 symbol=snap.symbol,
                 delta=snap.delta or 0.0,
@@ -141,7 +143,7 @@ async def get_option_greeks(
                 last_price=snap.last_price or 0.0,
                 volume=0,
                 open_interest=0,
-                last_date=snap.updated_at.strftime("%Y-%m-%d %H:%M:%S") if snap.updated_at else None
+                last_date=effective_date.strftime("%Y-%m-%d %H:%M:%S") if effective_date else None
             )
 
 
@@ -172,6 +174,15 @@ async def get_option_greeks(
                         snap.implied_vol = cboe_data.implied_vol
                         snap.underlying_price = cboe_data.underlying_price
                         snap.last_price = cboe_data.last_price
+
+                        # Store actual last trade time from CBOE
+                        if cboe_data.last_date:
+                            try:
+                                snap.last_trade_date = datetime.strptime(cboe_data.last_date, "%Y-%m-%d %H:%M:%S")
+                            except (ValueError, TypeError):
+                                snap.last_trade_date = datetime.now()
+                        else:
+                            snap.last_trade_date = datetime.now()
 
                         db.commit()
                         logger.info(f"Cached CBOE data for {db_symbol}")
@@ -217,6 +228,7 @@ async def get_option_greeks(
             logger.warning(f"Live qualification failed: {e}")
             if snap:
                 logger.info("Connection failed, falling back to STALE cache")
+                effective_date = snap.last_trade_date or snap.updated_at
                 return OptionGreeks(
                     symbol=snap.symbol,
                     delta=snap.delta or 0.0,
@@ -227,7 +239,8 @@ async def get_option_greeks(
                     underlying_price=snap.underlying_price or 0.0,
                     last_price=snap.last_price or 0.0,
                     volume=0,
-                    open_interest=0
+                    open_interest=0,
+                    last_date=effective_date.strftime("%Y-%m-%d %H:%M:%S") if effective_date else None
                 )
             raise e
 
@@ -235,6 +248,7 @@ async def get_option_greeks(
             if snap:
                 logger.warning(
                     f"Contract qualification failed for {underlying}, serving STALE cache.")
+                effective_date = snap.last_trade_date or snap.updated_at
                 return OptionGreeks(
                     symbol=snap.symbol,
                     delta=snap.delta or 0.0,
@@ -245,7 +259,8 @@ async def get_option_greeks(
                     underlying_price=snap.underlying_price or 0.0,
                     last_price=snap.last_price or 0.0,
                     volume=0,
-                    open_interest=0
+                    open_interest=0,
+                    last_date=effective_date.strftime("%Y-%m-%d %H:%M:%S") if effective_date else None
                 )
             raise HTTPException(
                 status_code=404,
@@ -315,6 +330,7 @@ async def get_option_greeks(
             if snap:
                 logger.warning(
                     f"No live data received for {underlying}, serving STALE cache.")
+                effective_date = snap.last_trade_date or snap.updated_at
                 return OptionGreeks(
                     symbol=snap.symbol,
                     delta=snap.delta or 0.0,
@@ -325,7 +341,8 @@ async def get_option_greeks(
                     underlying_price=snap.underlying_price or 0.0,
                     last_price=snap.last_price or 0.0,
                     volume=0,
-                    open_interest=0
+                    open_interest=0,
+                    last_date=effective_date.strftime("%Y-%m-%d %H:%M:%S") if effective_date else None
                 )
             raise HTTPException(
                 status_code=404,
@@ -376,6 +393,9 @@ async def get_option_greeks(
             snap.implied_vol = safe_float(g.impliedVol) if g else 0.0
             snap.underlying_price = safe_float(g.undPrice) if g else 0.0
             snap.last_price = safe_float(t_last)
+
+            # Store actual last trade time from IBKR (falls back to now)
+            snap.last_trade_date = t_time if t_time else datetime.now()
 
             db.commit()
             logger.info(f"Cached data for {display_symbol} (conId={cid}, Greeks={has_valid_greeks}, Price={has_valid_price})")

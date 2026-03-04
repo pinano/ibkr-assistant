@@ -61,13 +61,13 @@ function GETOPTIONDATA(param1, param2, param3, param4) {
             return [['Error: Use 1 param (OCC string) or 4 params (ticker, expDate, type, strike).']];
         }
 
-        // --- Try CBOE first (US options) ---
-        const cboeResult = _fetchFromCBOE(ticker, expDate, type, formattedStrike);
-        if (cboeResult) return [cboeResult];
-
-        // --- Fallback: IBKR API (European & other options) ---
+        // --- Try IBKR API first (has DB cache logic) ---
         const ibkrResult = _fetchFromIBKR(ticker, expDate, type, formattedStrike);
         if (ibkrResult) return [ibkrResult];
+
+        // --- Fallback: CBOE direct (US options, when API unavailable) ---
+        const cboeResult = _fetchFromCBOE(ticker, expDate, type, formattedStrike);
+        if (cboeResult) return [cboeResult];
 
         return [['Option not found on CBOE or IBKR.']];
 

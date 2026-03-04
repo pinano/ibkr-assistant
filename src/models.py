@@ -153,6 +153,7 @@ class OptionSnapshot(Base):
     vega = Column(Float)
     implied_vol = Column(Float)
     underlying_price = Column(Float)
+    last_trade_date = Column(DateTime, nullable=True)
 
 
 class MarketCache(Base):
