@@ -154,6 +154,8 @@ class OptionSnapshot(Base):
     implied_vol = Column(Float)
     underlying_price = Column(Float)
     last_trade_date = Column(DateTime, nullable=True)
+    volume = Column(Integer, nullable=True)
+    open_interest = Column(Integer, nullable=True)
 
 
 class MarketCache(Base):

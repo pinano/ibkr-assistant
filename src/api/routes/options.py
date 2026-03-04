@@ -132,6 +132,7 @@ async def get_option_greeks(
             logger.info(f"Serving cached greeks for conId={conId}")
             # Prefer last_trade_date (actual trade time); fall back to updated_at for old rows
             effective_date = snap.last_trade_date or snap.updated_at
+            cached_last_price = snap.last_price or 0.0
             return OptionGreeks(
                 symbol=snap.symbol,
                 delta=snap.delta or 0.0,
@@ -140,9 +141,9 @@ async def get_option_greeks(
                 theta=snap.theta or 0.0,
                 implied_vol=snap.implied_vol or 0.0,
                 underlying_price=snap.underlying_price or 0.0,
-                last_price=snap.last_price or 0.0,
-                volume=0,
-                open_interest=0,
+                last_price=cached_last_price if cached_last_price > 0 else 0.0,
+                volume=snap.volume or 0,
+                open_interest=snap.open_interest or 0,
                 last_date=effective_date.strftime("%Y-%m-%d %H:%M:%S") if effective_date else None
             )
 
@@ -174,6 +175,8 @@ async def get_option_greeks(
                         snap.implied_vol = cboe_data.implied_vol
                         snap.underlying_price = cboe_data.underlying_price
                         snap.last_price = cboe_data.last_price
+                        snap.volume = cboe_data.volume or 0
+                        snap.open_interest = cboe_data.open_interest or 0
 
                         # Store actual last trade time from CBOE
                         if cboe_data.last_date:
@@ -229,6 +232,7 @@ async def get_option_greeks(
             if snap:
                 logger.info("Connection failed, falling back to STALE cache")
                 effective_date = snap.last_trade_date or snap.updated_at
+                cached_last_price = snap.last_price or 0.0
                 return OptionGreeks(
                     symbol=snap.symbol,
                     delta=snap.delta or 0.0,
@@ -237,9 +241,9 @@ async def get_option_greeks(
                     theta=snap.theta or 0.0,
                     implied_vol=snap.implied_vol or 0.0,
                     underlying_price=snap.underlying_price or 0.0,
-                    last_price=snap.last_price or 0.0,
-                    volume=0,
-                    open_interest=0,
+                    last_price=cached_last_price if cached_last_price > 0 else 0.0,
+                    volume=snap.volume or 0,
+                    open_interest=snap.open_interest or 0,
                     last_date=effective_date.strftime("%Y-%m-%d %H:%M:%S") if effective_date else None
                 )
             raise e
@@ -249,6 +253,7 @@ async def get_option_greeks(
                 logger.warning(
                     f"Contract qualification failed for {underlying}, serving STALE cache.")
                 effective_date = snap.last_trade_date or snap.updated_at
+                cached_last_price = snap.last_price or 0.0
                 return OptionGreeks(
                     symbol=snap.symbol,
                     delta=snap.delta or 0.0,
@@ -257,9 +262,9 @@ async def get_option_greeks(
                     theta=snap.theta or 0.0,
                     implied_vol=snap.implied_vol or 0.0,
                     underlying_price=snap.underlying_price or 0.0,
-                    last_price=snap.last_price or 0.0,
-                    volume=0,
-                    open_interest=0,
+                    last_price=cached_last_price if cached_last_price > 0 else 0.0,
+                    volume=snap.volume or 0,
+                    open_interest=snap.open_interest or 0,
                     last_date=effective_date.strftime("%Y-%m-%d %H:%M:%S") if effective_date else None
                 )
             raise HTTPException(
@@ -331,6 +336,7 @@ async def get_option_greeks(
                 logger.warning(
                     f"No live data received for {underlying}, serving STALE cache.")
                 effective_date = snap.last_trade_date or snap.updated_at
+                cached_last_price = snap.last_price or 0.0
                 return OptionGreeks(
                     symbol=snap.symbol,
                     delta=snap.delta or 0.0,
@@ -339,9 +345,9 @@ async def get_option_greeks(
                     theta=snap.theta or 0.0,
                     implied_vol=snap.implied_vol or 0.0,
                     underlying_price=snap.underlying_price or 0.0,
-                    last_price=snap.last_price or 0.0,
-                    volume=0,
-                    open_interest=0,
+                    last_price=cached_last_price if cached_last_price > 0 else 0.0,
+                    volume=snap.volume or 0,
+                    open_interest=snap.open_interest or 0,
                     last_date=effective_date.strftime("%Y-%m-%d %H:%M:%S") if effective_date else None
                 )
             raise HTTPException(
@@ -392,7 +398,10 @@ async def get_option_greeks(
             snap.vega = safe_float(g.vega) if g else 0.0
             snap.implied_vol = safe_float(g.impliedVol) if g else 0.0
             snap.underlying_price = safe_float(g.undPrice) if g else 0.0
-            snap.last_price = safe_float(t_last)
+            # Filter IBKR's -1 sentinel (means "no data")
+            snap.last_price = safe_float(t_last) if (t_last is not None and t_last > 0) else 0.0
+            snap.volume = int(t_vol) if (t_vol is not None and not math.isnan(t_vol)) else 0
+            snap.open_interest = int(t_oi) if (t_oi is not None and not math.isnan(t_oi)) else 0
 
             # Store actual last trade time from IBKR (falls back to now)
             snap.last_trade_date = t_time if t_time else datetime.now()
@@ -415,7 +424,7 @@ async def get_option_greeks(
             open_interest=int(t_oi) if (
                 t_oi is not None and not math.isnan(t_oi)) else 0,
             last_price=t_last if (
-                t_last is not None and not math.isnan(t_last)) else 0.0,
+                t_last is not None and not math.isnan(t_last) and t_last > 0) else 0.0,
             last_date=t_time.strftime("%Y-%m-%d %H:%M:%S") if t_time else datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         )
 
