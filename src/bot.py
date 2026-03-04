@@ -486,55 +486,85 @@ async def cmd_today(m: types.Message):
     async with httpx.AsyncClient(timeout=30) as client:
         try:
             # 1. Fetch Real-time Summary
-            r = await client.get(f"{settings.WEB_SERVICE_URL}/account/summary", headers=API_HEADERS)
-            r.raise_for_status()
-            realtime_data = r.json()
-            curr_val = float(realtime_data.get('NetLiquidation', 0))
+            curr_val = None
+            try:
+                r = await client.get(f"{settings.WEB_SERVICE_URL}/account/summary", headers=API_HEADERS)
+                if r.status_code == 200:
+                    realtime_data = r.json()
+                    curr_val = float(realtime_data.get('NetLiquidation', 0))
+            except Exception as e:
+                logger.warning(f"Could not fetch real-time NAV: {e}")
 
-            # 2. Query today's min/max from DB
+            # 2. Query today's data from DB
             session = SessionLocal()
             try:
                 now = get_now()
                 today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+                today_end = today_start + timedelta(days=1, microseconds=-1)
 
-                # Get records for min and max today
+                first_rec = session.query(CashBalance).filter(
+                    CashBalance.date >= today_start,
+                    CashBalance.date <= today_end).order_by(
+                    CashBalance.date.asc()).first()
+                last_db_rec = session.query(CashBalance).filter(
+                    CashBalance.date >= today_start,
+                    CashBalance.date <= today_end).order_by(
+                    CashBalance.date.desc()).first()
                 min_rec = session.query(CashBalance).filter(
-                    CashBalance.date >= today_start).order_by(
+                    CashBalance.date >= today_start,
+                    CashBalance.date <= today_end).order_by(
                     CashBalance.nav.asc()).first()
                 max_rec = session.query(CashBalance).filter(
-                    CashBalance.date >= today_start).order_by(
+                    CashBalance.date >= today_start,
+                    CashBalance.date <= today_end).order_by(
                     CashBalance.nav.desc()).first()
 
-                if not min_rec:
-                    msg = (
-                        f"📅 *Daily NAV Range*\n"
-                        f"📭 No records found in the database for today.\n"
-                        f"💰 Current: `{curr_val:.2f}`"
-                    )
-                    await m.answer(msg, parse_mode="Markdown")
+                if not first_rec and curr_val is None:
+                    await m.answer(f"📭 No records found for today.")
                     return
 
-                min_val = float(min_rec.nav)
-                min_time = min_rec.date.strftime("%H:%M")
+                start_nav = float(first_rec.nav) if first_rec else curr_val
+                start_date = first_rec.date.strftime("%H:%M") if first_rec else "Now"
 
-                max_val = float(max_rec.nav)
-                max_time = max_rec.date.strftime("%H:%M")
+                end_nav = curr_val if curr_val is not None else (float(last_db_rec.nav) if last_db_rec else start_nav)
+                end_date = "Now" if curr_val is not None else (last_db_rec.date.strftime("%H:%M") if last_db_rec else start_date)
+                is_now = curr_val is not None
 
-                # Adjust with current value if it's more extreme than what's in
-                # DB today
-                if curr_val < min_val:
-                    min_val = curr_val
-                    min_time = f"{get_now().strftime('%H:%M')} (Now)"
-                if curr_val > max_val:
-                    max_val = curr_val
-                    max_time = f"{get_now().strftime('%H:%M')} (Now)"
+                period_var = ((end_nav - start_nav) / start_nav * 100) if start_nav else 0
+
+                min_val = float(min_rec.nav) if min_rec else curr_val
+                min_date = min_rec.date.strftime("%H:%M") if min_rec else "Now"
+
+                max_val = float(max_rec.nav) if max_rec else curr_val
+                max_date = max_rec.date.strftime("%H:%M") if max_rec else "Now"
+
+                if curr_val is not None:
+                    if curr_val < min_val:
+                        min_val = curr_val
+                        min_date = "Now"
+                    if curr_val > max_val:
+                        max_val = curr_val
+                        max_date = "Now"
+
+                range_var = ((max_val - min_val) / min_val * 100) if min_val else 0
 
                 msg = (
-                    f"📅 *Daily NAV Range*\n"
-                    f"🔹 Min: `{min_val:.2f}` (at {min_time})\n"
-                    f"🔸 Max: `{max_val:.2f}` (at {max_time})\n"
-                    f"💰 Current: `{curr_val:.2f}`"
+                    f"📅 *NAV Analysis for Today*\n\n"
+                    f"🏁 *Period:*\n"
+                    f"• Start: `{start_nav:.2f}` ({start_date})\n"
+                    f"• End:   `{end_nav:.2f}` ({end_date}{' - Act' if is_now else ''})\n"
+                    f"• Var:   `{period_var:+.2f}%`"
                 )
+
+                msg += "\n\n-------------------\n\n"
+
+                msg += (
+                    f"� *Range:*\n"
+                    f"• Min:   `{min_val:.2f}` ({min_date})\n"
+                    f"• Max:   `{max_val:.2f}` ({max_date})\n"
+                    f"• Var:   `{range_var:+.2f}%`"
+                )
+
                 await m.answer(msg, parse_mode="Markdown")
             finally:
                 session.close()
@@ -667,6 +697,202 @@ async def cmd_year(m: types.Message):
             await m.answer("❌ Error interno. Revisa los logs.")
 
 
+@dp.message(Command("month", ignore_case=True))
+async def cmd_month(m: types.Message):
+    if m.from_user.id not in settings.allowed_ids_list:
+        return
+
+    async with httpx.AsyncClient(timeout=30) as client:
+        try:
+            # 1. Fetch Real-time Summary
+            curr_val = None
+            try:
+                r = await client.get(f"{settings.WEB_SERVICE_URL}/account/summary", headers=API_HEADERS)
+                if r.status_code == 200:
+                    realtime_data = r.json()
+                    curr_val = float(realtime_data.get('NetLiquidation', 0))
+            except Exception as e:
+                logger.warning(f"Could not fetch real-time NAV: {e}")
+
+            # 2. Query month data from DB
+            session = SessionLocal()
+            try:
+                now = get_now()
+                month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+                if now.month == 12:
+                    month_end = now.replace(year=now.year + 1, month=1, day=1, hour=0, minute=0, second=0, microsecond=0) - timedelta(seconds=1)
+                else:
+                    month_end = now.replace(month=now.month + 1, day=1, hour=0, minute=0, second=0, microsecond=0) - timedelta(seconds=1)
+
+                first_rec = session.query(CashBalance).filter(
+                    CashBalance.date >= month_start,
+                    CashBalance.date <= month_end).order_by(
+                    CashBalance.date.asc()).first()
+                last_db_rec = session.query(CashBalance).filter(
+                    CashBalance.date >= month_start,
+                    CashBalance.date <= month_end).order_by(
+                    CashBalance.date.desc()).first()
+                min_rec = session.query(CashBalance).filter(
+                    CashBalance.date >= month_start,
+                    CashBalance.date <= month_end).order_by(
+                    CashBalance.nav.asc()).first()
+                max_rec = session.query(CashBalance).filter(
+                    CashBalance.date >= month_start,
+                    CashBalance.date <= month_end).order_by(
+                    CashBalance.nav.desc()).first()
+
+                if not first_rec and curr_val is None:
+                    await m.answer(f"📭 No records found for this month.")
+                    return
+
+                start_nav = float(first_rec.nav) if first_rec else curr_val
+                start_date = first_rec.date.strftime("%Y-%m-%d") if first_rec else "Now"
+
+                # Current month implies end is now
+                end_nav = curr_val if curr_val is not None else (float(last_db_rec.nav) if last_db_rec else start_nav)
+                end_date = "Now" if curr_val is not None else (last_db_rec.date.strftime("%Y-%m-%d") if last_db_rec else start_date)
+                is_now = curr_val is not None
+
+                period_var = ((end_nav - start_nav) / start_nav * 100) if start_nav else 0
+
+                min_val = float(min_rec.nav) if min_rec else curr_val
+                min_date = min_rec.date.strftime("%Y-%m-%d") if min_rec else "Now"
+
+                max_val = float(max_rec.nav) if max_rec else curr_val
+                max_date = max_rec.date.strftime("%Y-%m-%d") if max_rec else "Now"
+
+                if curr_val is not None:
+                    if curr_val < min_val:
+                        min_val = curr_val
+                        min_date = "Now"
+                    if curr_val > max_val:
+                        max_val = curr_val
+                        max_date = "Now"
+
+                range_var = ((max_val - min_val) / min_val * 100) if min_val else 0
+
+                month_name = now.strftime("%B %Y")
+                msg = (
+                    f"📅 *NAV Analysis for {month_name}*\n\n"
+                    f"🏁 *Period:*\n"
+                    f"• Start: `{start_nav:.2f}` ({start_date})\n"
+                    f"• End:   `{end_nav:.2f}` ({end_date}{' - Act' if is_now else ''})\n"
+                    f"• Var:   `{period_var:+.2f}%`"
+                )
+
+                msg += "\n\n-------------------\n\n"
+
+                msg += (
+                    f"📊 *Range:*\n"
+                    f"• Min:   `{min_val:.2f}` ({min_date})\n"
+                    f"• Max:   `{max_val:.2f}` ({max_date})\n"
+                    f"• Var:   `{range_var:+.2f}%`"
+                )
+
+                await m.answer(msg, parse_mode="Markdown")
+            finally:
+                session.close()
+
+        except Exception as e:
+            logger.error(f"Error in cmd_month: {e}", exc_info=True)
+            await m.answer("❌ Error interno. Revisa los logs.")
+
+
+@dp.message(Command("week", ignore_case=True))
+async def cmd_week(m: types.Message):
+    if m.from_user.id not in settings.allowed_ids_list:
+        return
+
+    async with httpx.AsyncClient(timeout=30) as client:
+        try:
+            curr_val = None
+            try:
+                r = await client.get(f"{settings.WEB_SERVICE_URL}/account/summary", headers=API_HEADERS)
+                if r.status_code == 200:
+                    realtime_data = r.json()
+                    curr_val = float(realtime_data.get('NetLiquidation', 0))
+            except Exception as e:
+                logger.warning(f"Could not fetch real-time NAV: {e}")
+
+            session = SessionLocal()
+            try:
+                now = get_now()
+                week_start = (now - timedelta(days=now.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
+                week_end = week_start + timedelta(days=6, hours=23, minutes=59, seconds=59)
+
+                first_rec = session.query(CashBalance).filter(
+                    CashBalance.date >= week_start,
+                    CashBalance.date <= week_end).order_by(
+                    CashBalance.date.asc()).first()
+                last_db_rec = session.query(CashBalance).filter(
+                    CashBalance.date >= week_start,
+                    CashBalance.date <= week_end).order_by(
+                    CashBalance.date.desc()).first()
+                min_rec = session.query(CashBalance).filter(
+                    CashBalance.date >= week_start,
+                    CashBalance.date <= week_end).order_by(
+                    CashBalance.nav.asc()).first()
+                max_rec = session.query(CashBalance).filter(
+                    CashBalance.date >= week_start,
+                    CashBalance.date <= week_end).order_by(
+                    CashBalance.nav.desc()).first()
+
+                if not first_rec and curr_val is None:
+                    await m.answer(f"📭 No records found for this week.")
+                    return
+
+                start_nav = float(first_rec.nav) if first_rec else curr_val
+                start_date = first_rec.date.strftime("%Y-%m-%d %H:%M") if first_rec else "Now"
+
+                end_nav = curr_val if curr_val is not None else (float(last_db_rec.nav) if last_db_rec else start_nav)
+                end_date = "Now" if curr_val is not None else (last_db_rec.date.strftime("%Y-%m-%d %H:%M") if last_db_rec else start_date)
+                is_now = curr_val is not None
+
+                period_var = ((end_nav - start_nav) / start_nav * 100) if start_nav else 0
+
+                min_val = float(min_rec.nav) if min_rec else curr_val
+                min_date = min_rec.date.strftime("%Y-%m-%d %H:%M") if min_rec else "Now"
+
+                max_val = float(max_rec.nav) if max_rec else curr_val
+                max_date = max_rec.date.strftime("%Y-%m-%d %H:%M") if max_rec else "Now"
+
+                if curr_val is not None:
+                    if curr_val < min_val:
+                        min_val = curr_val
+                        min_date = "Now"
+                    if curr_val > max_val:
+                        max_val = curr_val
+                        max_date = "Now"
+
+                range_var = ((max_val - min_val) / min_val * 100) if min_val else 0
+
+                week_num = now.isocalendar()[1]
+                msg = (
+                    f"📅 *NAV Analysis for Week {week_num}*\n\n"
+                    f"🏁 *Period:*\n"
+                    f"• Start: `{start_nav:.2f}` ({start_date})\n"
+                    f"• End:   `{end_nav:.2f}` ({end_date}{' - Act' if is_now else ''})\n"
+                    f"• Var:   `{period_var:+.2f}%`"
+                )
+
+                msg += "\n\n-------------------\n\n"
+
+                msg += (
+                    f"📊 *Range:*\n"
+                    f"• Min:   `{min_val:.2f}` ({min_date})\n"
+                    f"• Max:   `{max_val:.2f}` ({max_date})\n"
+                    f"• Var:   `{range_var:+.2f}%`"
+                )
+
+                await m.answer(msg, parse_mode="Markdown")
+            finally:
+                session.close()
+
+        except Exception as e:
+            logger.error(f"Error in cmd_week: {e}", exc_info=True)
+            await m.answer("❌ Error interno. Revisa los logs.")
+
+
 @dp.message(Command("help", ignore_case=True))
 async def cmd_help(m: types.Message):
     if m.from_user.id not in settings.allowed_ids_list:
@@ -684,6 +910,8 @@ async def cmd_help(m: types.Message):
         "📑 /options - Interactive options dashboard\n"
         "🏆 /max - Show All Time High\n"
         "📊 /today - Today's NAV Min/Max/Current\n"
+        "📅 /week - Week's NAV Min/Max/Diff/Var%\n"
+        "📅 /month - Month's NAV Min/Max/Diff/Var%\n"
         "📅 /year [YYYY] - Year's NAV Min/Max/Diff/Var%\n"
         "📊 /flex [PARAM] - Manual Flex Report (PARAM: monthly|YYYYMMDD)\n"
         "⚠️ /delta - Check high delta short positions now\n"
