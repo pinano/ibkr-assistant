@@ -425,7 +425,7 @@ async def get_option_greeks(
                 t_oi is not None and not math.isnan(t_oi)) else 0,
             last_price=t_last if (
                 t_last is not None and not math.isnan(t_last) and t_last > 0) else 0.0,
-            last_date=t_time.strftime("%Y-%m-%d %H:%M:%S") if t_time else None
+            last_date=t_time.strftime("%Y-%m-%d %H:%M:%S") if t_time else datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         )
 
     except Exception as e:
@@ -578,7 +578,7 @@ async def get_option_risk(symbol: str):
                 t_oi is not None and not math.isnan(t_oi)) else 0,
             last_price=t_last if (
                 t_last is not None and not math.isnan(t_last)) else 0.0,
-            last_date=t_time.strftime("%Y-%m-%d %H:%M:%S") if t_time else None
+            last_date=t_time.strftime("%Y-%m-%d %H:%M:%S") if t_time else datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         )
 
     except Exception as e:
