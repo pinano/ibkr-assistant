@@ -88,7 +88,7 @@ async def _fetch_cboe_greeks(ticker: str, expiry: str, strike: float, right: str
             last_price=val_or_zero(option_data.get('last_trade_price')),
             volume=int(val_or_zero(option_data.get('volume'))),
             open_interest=int(val_or_zero(option_data.get('open_interest'))),
-            last_date=option_data.get('last_trade_time') or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            last_date=option_data.get('last_trade_time')
         )
 
     except Exception as e:

@@ -181,11 +181,11 @@ async def get_option_greeks(
                         # Store actual last trade time from CBOE
                         if cboe_data.last_date:
                             try:
-                                snap.last_trade_date = datetime.strptime(cboe_data.last_date, "%Y-%m-%d %H:%M:%S")
+                                snap.last_trade_date = datetime.fromisoformat(cboe_data.last_date)
                             except (ValueError, TypeError):
-                                snap.last_trade_date = datetime.now()
+                                snap.last_trade_date = None
                         else:
-                            snap.last_trade_date = datetime.now()
+                            snap.last_trade_date = None
 
                         db.commit()
                         logger.info(f"Cached CBOE data for {db_symbol}")
@@ -403,8 +403,8 @@ async def get_option_greeks(
             snap.volume = int(t_vol) if (t_vol is not None and not math.isnan(t_vol)) else 0
             snap.open_interest = int(t_oi) if (t_oi is not None and not math.isnan(t_oi)) else 0
 
-            # Store actual last trade time from IBKR (falls back to now)
-            snap.last_trade_date = t_time if t_time else datetime.now()
+            # Store actual last trade time from IBKR (allow NULL database entry if missing)
+            snap.last_trade_date = t_time  # t_time is a datetime object or None
 
             db.commit()
             logger.info(f"Cached data for {display_symbol} (conId={cid}, Greeks={has_valid_greeks}, Price={has_valid_price})")
@@ -425,7 +425,7 @@ async def get_option_greeks(
                 t_oi is not None and not math.isnan(t_oi)) else 0,
             last_price=t_last if (
                 t_last is not None and not math.isnan(t_last) and t_last > 0) else 0.0,
-            last_date=t_time.strftime("%Y-%m-%d %H:%M:%S") if t_time else datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            last_date=t_time.strftime("%Y-%m-%d %H:%M:%S") if t_time else None
         )
 
     except Exception as e:
