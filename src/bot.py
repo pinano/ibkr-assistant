@@ -1237,22 +1237,23 @@ async def scheduled_flex_report(
 
         email_status = await asyncio.to_thread(FlexReporter.send_email, html, subject)
 
-        # Send Telegram Messages (Summary + Dividends etc)
-        # Ensure date is shown first as requested
-        await notify_admins(f"📅 *{report_type} Flex Query Date*: `{date_range_html}`")
+        # Send unified Telegram Message (Summary + Dividends etc)
+        combined_msg = f"📅 <b>{report_type} Flex Query Date</b>: <code>{date_range_html}</code>\n\n"
 
         for msg in telegram_msgs:
             if msg.strip():
-                # Split message into lines and wrap each in code
-                lines = msg.strip().split('\n')
-                formatted_msg = '\n'.join(
-                    f'<code>{line}</code>' for line in lines if line.strip())
-                await notify_admins(formatted_msg, parse_mode="HTML")
+                # Add each section in a pre-formatted block
+                combined_msg += f"<pre>{msg.strip()}</pre>\n\n"
 
-        # Send simple completion status with Archiving info
-        await notify_admins(
-            f"📊 *{report_type} Report Generated*\nDate: {date_range_html}\nArchived: {archive_status}\nEmail: {email_status}"
+        # Add completion status with Archiving info
+        combined_msg += (
+            f"📊 <b>{report_type} Report Generated</b>\n"
+            f"Date: <code>{date_range_html}</code>\n"
+            f"Archived: <code>{archive_status}</code>\n"
+            f"Email: <code>{email_status}</code>"
         )
+        
+        await notify_admins(combined_msg, parse_mode="HTML")
     except Exception as e:
         logger.error(f"{report_type} Scheduler/Report Error: {e}")
         if not local_date:
