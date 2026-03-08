@@ -106,7 +106,7 @@ class FlexReporter:
             html.append('<h1>' + dateRangeHTML + ': Cash Transactions Report</h1>')
 
             # CashReport
-            summary_msg = "Flex Query Report\n" + "-" * 12 + "\n"
+            summary_msg = "💰 <b>Cash Report</b>\n"
             html.append('<h2>Cash Report</h2>')
             html.append('<table> <thead> <tr>')
             html.append('<td>cur</td> <td>startCash</td> <td>endCash</td> <td>endSettledCash</td> <td>deposits</td> '
@@ -140,7 +140,7 @@ class FlexReporter:
                 html.append(f'<td class="r">{fmt_num(c("transactionTax"))}</td>')
                 html.append(f'<td class="r">{fmt_num(c("fxTranslationGainLoss"))}</td>')
                 html.append('</tr>')
-                summary_msg += f"{cur_telegram.rjust(4, ' ')}: {fmt_num(c('endingCash'))}\n"
+                summary_msg += f"• <b>{cur_telegram}</b>: <code>{fmt_num(c('endingCash'))}</code>\n"
             html.append('</tbody></table>')
             telegram_msgs.append(summary_msg)
 
@@ -154,8 +154,8 @@ class FlexReporter:
                 if a('type') == 'Dividends':
                     has_dividends = True
                     if not dividend_msg:
-                        dividend_msg = "Dividends\n" + "-" * 12 + "\n"
-                    dividend_msg += f"{a('symbol')}: {a('currency')} {fmt_num(a('amount'), 3)}\n{a('description')}\n"
+                        dividend_msg = "💸 <b>Dividends</b>\n"
+                    dividend_msg += f"• <b>{a('symbol')}</b>: <code>{a('currency')} {fmt_num(a('amount'), 3)}</code>\n  <i>{a('description')}</i>\n"
 
                 cls = 'red' if float(a('amount') or 0) < 0 else 'green'
                 html.append(f'<tr class="{"even" if i % 2 else "odd"}">')

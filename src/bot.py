@@ -1242,8 +1242,8 @@ async def scheduled_flex_report(
 
         for msg in telegram_msgs:
             if msg.strip():
-                # Add each section in a pre-formatted block
-                combined_msg += f"<pre>{msg.strip()}</pre>\n\n"
+                # Add each section directly, since it's already HTML formatted
+                combined_msg += f"{msg.strip()}\n\n"
 
         # Add completion status with Archiving info
         combined_msg += (
