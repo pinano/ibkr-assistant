@@ -586,11 +586,17 @@ async def cmd_year(m: types.Message):
 
     args = m.text.split()
     target_year = get_now().year
+    years_back = None
     if len(args) > 1:
         try:
-            target_year = int(args[1])
+            val = int(args[1])
+            if val < 100:
+                years_back = val
+                target_year = None
+            else:
+                target_year = val
         except ValueError:
-            await m.answer("❌ Invalid year format. Use `/year YYYY`.", parse_mode="Markdown")
+            await m.answer("❌ Invalid format. Use `/year YYYY` or `/year N`.", parse_mode="Markdown")
             return
 
     async with httpx.AsyncClient(timeout=30) as client:
@@ -608,8 +614,18 @@ async def cmd_year(m: types.Message):
             # 2. Query year data from DB
             session = SessionLocal()
             try:
-                year_start = datetime(target_year, 1, 1)
-                year_end = datetime(target_year, 12, 31, 23, 59, 59)
+                now_dt = get_now().replace(tzinfo=None)
+                if years_back is not None:
+                    try:
+                        year_start = now_dt.replace(year=now_dt.year - years_back)
+                    except ValueError:
+                        year_start = now_dt.replace(year=now_dt.year - years_back, day=28)
+                    year_end = now_dt
+                    period_name = f"Last {years_back} Year{'s' if years_back > 1 else ''}"
+                else:
+                    year_start = datetime(target_year, 1, 1)
+                    year_end = datetime(target_year, 12, 31, 23, 59, 59)
+                    period_name = str(target_year)
 
                 # Period Start
                 first_rec = session.query(CashBalance).filter(
@@ -632,8 +648,8 @@ async def cmd_year(m: types.Message):
                     CashBalance.nav.desc()).first()
 
                 if not first_rec and (
-                        curr_val is None or target_year != get_now().year):
-                    await m.answer(f"📭 No records found for year {target_year}.")
+                        curr_val is None or (target_year is not None and target_year != get_now().year)):
+                    await m.answer(f"📭 No records found for {period_name}.")
                     return
 
                 # Calculate Start
@@ -643,7 +659,7 @@ async def cmd_year(m: types.Message):
 
                 # Calculate End
                 is_now = False
-                if target_year == now.year and curr_val is not None:
+                if (years_back is not None or target_year == now.year) and curr_val is not None:
                     end_nav = curr_val
                     end_date = "Now"
                     is_now = True
@@ -662,7 +678,7 @@ async def cmd_year(m: types.Message):
                 max_val = float(max_rec.nav) if max_rec else curr_val
                 max_date = format_nav_date(max_rec.date, now) if max_rec else "Now"
 
-                if target_year == get_now().year and curr_val is not None:
+                if (years_back is not None or target_year == get_now().year) and curr_val is not None:
                     if curr_val < min_val:
                         min_val = curr_val
                         min_date = "Now"
@@ -674,7 +690,7 @@ async def cmd_year(m: types.Message):
                     (max_val - min_val) / min_val * 100) if min_val else 0
 
                 msg = (
-                    f"📅 *NAV Analysis for {target_year}*\n\n"
+                    f"📅 *NAV Analysis for {period_name}*\n\n"
                     f"🏁 *Period:*\n"
                     f"• Start: `{start_nav:.2f}` ({start_date})\n"
                     f"• End:   `{end_nav:.2f}` ({end_date})\n"
