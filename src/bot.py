@@ -52,10 +52,12 @@ def get_now() -> datetime:
         return datetime.now()
 
 
-def format_nav_date(dt: datetime, now_dt: datetime) -> str:
-    """Format date to HH:MM if today, else DD/MM HH:MM."""
+def format_nav_date(dt: datetime, now_dt: datetime, include_year: bool = False) -> str:
+    """Format date to HH:MM if today, else DD/MM HH:MM. If include_year is True, DD/MM/YY HH:MM."""
     if dt.date() == now_dt.date():
         return dt.strftime("%H:%M")
+    if include_year:
+        return dt.strftime("%d/%m/%y %H:%M")
     return dt.strftime("%d/%m %H:%M")
 
 async def notify_admins(text: str, parse_mode: str = "Markdown"):
@@ -654,8 +656,9 @@ async def cmd_year(m: types.Message):
 
                 # Calculate Start
                 now = get_now()
+                include_y = years_back is not None
                 start_nav = float(first_rec.nav) if first_rec else curr_val
-                start_date = format_nav_date(first_rec.date, now) if first_rec else "Now"
+                start_date = format_nav_date(first_rec.date, now, include_y) if first_rec else "Now"
 
                 # Calculate End
                 is_now = False
@@ -666,17 +669,17 @@ async def cmd_year(m: types.Message):
                 else:
                     end_nav = float(
                         last_db_rec.nav) if last_db_rec else start_nav
-                    end_date = format_nav_date(last_db_rec.date, now) if last_db_rec else start_date
+                    end_date = format_nav_date(last_db_rec.date, now, include_y) if last_db_rec else start_date
 
                 period_var = ((end_nav - start_nav) /
                               start_nav * 100) if start_nav else 0
 
                 # Calculate Min/Max (including current if applicable)
                 min_val = float(min_rec.nav) if min_rec else curr_val
-                min_date = format_nav_date(min_rec.date, now) if min_rec else "Now"
+                min_date = format_nav_date(min_rec.date, now, include_y) if min_rec else "Now"
 
                 max_val = float(max_rec.nav) if max_rec else curr_val
-                max_date = format_nav_date(max_rec.date, now) if max_rec else "Now"
+                max_date = format_nav_date(max_rec.date, now, include_y) if max_rec else "Now"
 
                 if (years_back is not None or target_year == get_now().year) and curr_val is not None:
                     if curr_val < min_val:
