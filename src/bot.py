@@ -485,7 +485,7 @@ async def cmd_max(m: types.Message):
             await m.answer("❌ Error interno. Revisa los logs.")
 
 
-@dp.message(Command("today", ignore_case=True))
+@dp.message(Command("today", "day", ignore_case=True))
 async def cmd_today(m: types.Message):
     if m.from_user.id not in settings.allowed_ids_list:
         return
@@ -502,12 +502,27 @@ async def cmd_today(m: types.Message):
             except Exception as e:
                 logger.warning(f"Could not fetch real-time NAV: {e}")
 
-            # 2. Query today's data from DB
+            # 2. Query data from DB
             session = SessionLocal()
             try:
+                args = m.text.split()
+                n_days = None
+                if len(args) > 1:
+                    try:
+                        n_days = int(args[1])
+                    except ValueError:
+                        await m.answer("❌ Format error. Use `/today [N]` or `/day [N]`.")
+                        return
+
                 now = get_now()
-                today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-                today_end = today_start + timedelta(days=1, microseconds=-1)
+                if n_days is not None:
+                    today_start = (now - timedelta(days=n_days)).replace(tzinfo=None)
+                    period_name = f"Last {n_days} Day{'s' if n_days > 1 else ''}"
+                else:
+                    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0).replace(tzinfo=None)
+                    period_name = "Today"
+
+                today_end = now.replace(tzinfo=None)
 
                 first_rec = session.query(CashBalance).filter(
                     CashBalance.date >= today_start,
@@ -527,23 +542,24 @@ async def cmd_today(m: types.Message):
                     CashBalance.nav.desc()).first()
 
                 if not first_rec and curr_val is None:
-                    await m.answer(f"📭 No records found for today.")
+                    await m.answer(f"📭 No records found for {period_name}.")
                     return
 
+                include_year = n_days is not None and n_days > 365
                 start_nav = float(first_rec.nav) if first_rec else curr_val
-                start_date = first_rec.date.strftime("%H:%M") if first_rec else "Now"
+                start_date = format_nav_date(first_rec.date, now, include_year) if first_rec else "Now"
 
                 end_nav = curr_val if curr_val is not None else (float(last_db_rec.nav) if last_db_rec else start_nav)
-                end_date = "Now" if curr_val is not None else (last_db_rec.date.strftime("%H:%M") if last_db_rec else start_date)
+                end_date = "Now" if curr_val is not None else (format_nav_date(last_db_rec.date, now, include_year) if last_db_rec else start_date)
                 is_now = curr_val is not None
 
                 period_var = ((end_nav - start_nav) / start_nav * 100) if start_nav else 0
 
                 min_val = float(min_rec.nav) if min_rec else curr_val
-                min_date = min_rec.date.strftime("%H:%M") if min_rec else "Now"
+                min_date = format_nav_date(min_rec.date, now, include_year) if min_rec else "Now"
 
                 max_val = float(max_rec.nav) if max_rec else curr_val
-                max_date = max_rec.date.strftime("%H:%M") if max_rec else "Now"
+                max_date = format_nav_date(max_rec.date, now, include_year) if max_rec else "Now"
 
                 if curr_val is not None:
                     if curr_val < min_val:
@@ -556,7 +572,7 @@ async def cmd_today(m: types.Message):
                 range_var = ((max_val - min_val) / min_val * 100) if min_val else 0
 
                 msg = (
-                    f"📅 *NAV Analysis for Today*\n\n"
+                    f"📅 *NAV Analysis for {period_name}*\n\n"
                     f"🏁 *Period:*\n"
                     f"• Start: `{start_nav:.2f}` ({start_date})\n"
                     f"• End:   `{end_nav:.2f}` ({end_date})\n"
@@ -735,15 +751,41 @@ async def cmd_month(m: types.Message):
             except Exception as e:
                 logger.warning(f"Could not fetch real-time NAV: {e}")
 
-            # 2. Query month data from DB
+            # 2. Query data from DB
             session = SessionLocal()
             try:
+                args = m.text.split()
+                n_months = None
+                if len(args) > 1:
+                    try:
+                        n_months = int(args[1])
+                    except ValueError:
+                        await m.answer("❌ Format error. Use `/month [N]`.")
+                        return
+
                 now = get_now()
-                month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-                if now.month == 12:
-                    month_end = now.replace(year=now.year + 1, month=1, day=1, hour=0, minute=0, second=0, microsecond=0) - timedelta(seconds=1)
+                if n_months is not None:
+                    # Subtract months logic
+                    year = now.year - (n_months // 12)
+                    month = now.month - (n_months % 12)
+                    if month <= 0:
+                        month += 12
+                        year -= 1
+                    try:
+                        month_start = now.replace(year=year, month=month).replace(tzinfo=None)
+                    except ValueError:
+                        # Handle cases like March 31 -> Feb 28
+                        import calendar
+                        _, last_day = calendar.monthrange(year, month)
+                        month_start = now.replace(year=year, month=month, day=last_day).replace(tzinfo=None)
+                    
+                    period_name = f"Last {n_months} Month{'s' if n_months > 1 else ''}"
                 else:
-                    month_end = now.replace(month=now.month + 1, day=1, hour=0, minute=0, second=0, microsecond=0) - timedelta(seconds=1)
+                    month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0).replace(tzinfo=None)
+                    month_name = now.strftime("%B %Y")
+                    period_name = month_name
+
+                month_end = now.replace(tzinfo=None)
 
                 first_rec = session.query(CashBalance).filter(
                     CashBalance.date >= month_start,
@@ -763,23 +805,24 @@ async def cmd_month(m: types.Message):
                     CashBalance.nav.desc()).first()
 
                 if not first_rec and curr_val is None:
-                    await m.answer(f"📭 No records found for this month.")
+                    await m.answer(f"📭 No records found for {period_name}.")
                     return
 
+                include_year = (n_months is not None and n_months > 12) or (n_months is None)
                 start_nav = float(first_rec.nav) if first_rec else curr_val
-                start_date = format_nav_date(first_rec.date, now) if first_rec else "Now"
+                start_date = format_nav_date(first_rec.date, now, include_year) if first_rec else "Now"
 
                 end_nav = curr_val if curr_val is not None else (float(last_db_rec.nav) if last_db_rec else start_nav)
-                end_date = "Now" if curr_val is not None else (format_nav_date(last_db_rec.date, now) if last_db_rec else start_date)
+                end_date = "Now" if curr_val is not None else (format_nav_date(last_db_rec.date, now, include_year) if last_db_rec else start_date)
                 is_now = curr_val is not None
 
                 period_var = ((end_nav - start_nav) / start_nav * 100) if start_nav else 0
 
                 min_val = float(min_rec.nav) if min_rec else curr_val
-                min_date = format_nav_date(min_rec.date, now) if min_rec else "Now"
+                min_date = format_nav_date(min_rec.date, now, include_year) if min_rec else "Now"
 
                 max_val = float(max_rec.nav) if max_rec else curr_val
-                max_date = format_nav_date(max_rec.date, now) if max_rec else "Now"
+                max_date = format_nav_date(max_rec.date, now, include_year) if max_rec else "Now"
 
                 if curr_val is not None:
                     if curr_val < min_val:
@@ -791,9 +834,8 @@ async def cmd_month(m: types.Message):
 
                 range_var = ((max_val - min_val) / min_val * 100) if min_val else 0
 
-                month_name = now.strftime("%B %Y")
                 msg = (
-                    f"📅 *NAV Analysis for {month_name}*\n\n"
+                    f"📅 *NAV Analysis for {period_name}*\n\n"
                     f"🏁 *Period:*\n"
                     f"• Start: `{start_nav:.2f}` ({start_date})\n"
                     f"• End:   `{end_nav:.2f}` ({end_date})\n"
@@ -836,9 +878,25 @@ async def cmd_week(m: types.Message):
 
             session = SessionLocal()
             try:
+                args = m.text.split()
+                n_weeks = None
+                if len(args) > 1:
+                    try:
+                        n_weeks = int(args[1])
+                    except ValueError:
+                        await m.answer("❌ Format error. Use `/week [N]`.")
+                        return
+
                 now = get_now()
-                week_start = (now - timedelta(days=now.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
-                week_end = week_start + timedelta(days=6, hours=23, minutes=59, seconds=59)
+                if n_weeks is not None:
+                    week_start = (now - timedelta(weeks=n_weeks)).replace(tzinfo=None)
+                    period_name = f"Last {n_weeks} Week{'s' if n_weeks > 1 else ''}"
+                else:
+                    week_start = (now - timedelta(days=now.weekday())).replace(hour=0, minute=0, second=0, microsecond=0).replace(tzinfo=None)
+                    week_num = now.isocalendar()[1]
+                    period_name = f"Week {week_num}"
+
+                week_end = now.replace(tzinfo=None)
 
                 first_rec = session.query(CashBalance).filter(
                     CashBalance.date >= week_start,
@@ -858,23 +916,24 @@ async def cmd_week(m: types.Message):
                     CashBalance.nav.desc()).first()
 
                 if not first_rec and curr_val is None:
-                    await m.answer(f"📭 No records found for this week.")
+                    await m.answer(f"📭 No records found for {period_name}.")
                     return
 
+                include_year = n_weeks is not None and n_weeks > 52
                 start_nav = float(first_rec.nav) if first_rec else curr_val
-                start_date = format_nav_date(first_rec.date, now) if first_rec else "Now"
+                start_date = format_nav_date(first_rec.date, now, include_year) if first_rec else "Now"
 
                 end_nav = curr_val if curr_val is not None else (float(last_db_rec.nav) if last_db_rec else start_nav)
-                end_date = "Now" if curr_val is not None else (format_nav_date(last_db_rec.date, now) if last_db_rec else start_date)
+                end_date = "Now" if curr_val is not None else (format_nav_date(last_db_rec.date, now, include_year) if last_db_rec else start_date)
                 is_now = curr_val is not None
 
                 period_var = ((end_nav - start_nav) / start_nav * 100) if start_nav else 0
 
                 min_val = float(min_rec.nav) if min_rec else curr_val
-                min_date = format_nav_date(min_rec.date, now) if min_rec else "Now"
+                min_date = format_nav_date(min_rec.date, now, include_year) if min_rec else "Now"
 
                 max_val = float(max_rec.nav) if max_rec else curr_val
-                max_date = format_nav_date(max_rec.date, now) if max_rec else "Now"
+                max_date = format_nav_date(max_rec.date, now, include_year) if max_rec else "Now"
 
                 if curr_val is not None:
                     if curr_val < min_val:
@@ -886,9 +945,8 @@ async def cmd_week(m: types.Message):
 
                 range_var = ((max_val - min_val) / min_val * 100) if min_val else 0
 
-                week_num = now.isocalendar()[1]
                 msg = (
-                    f"📅 *NAV Analysis for Week {week_num}*\n\n"
+                    f"📅 *NAV Analysis for {period_name}*\n\n"
                     f"🏁 *Period:*\n"
                     f"• Start: `{start_nav:.2f}` ({start_date})\n"
                     f"• End:   `{end_nav:.2f}` ({end_date})\n"
@@ -929,10 +987,10 @@ async def cmd_help(m: types.Message):
         "🔗 /chain SYMBOL - Show option chain\n"
         "📑 /options - Interactive options dashboard\n"
         "🏆 /max - Show All Time High\n"
-        "📊 /today - Today's NAV Min/Max/Current\n"
-        "📅 /week - Week's NAV Min/Max/Diff/Var%\n"
-        "📅 /month - Month's NAV Min/Max/Diff/Var%\n"
-        "📅 /year [YYYY] - Year's NAV Min/Max/Diff/Var%\n"
+        "📊 /today [N] - Today's (or last N days) NAV variation\n"
+        "📅 /week [N] - Week's (or last N weeks) NAV variation\n"
+        "📅 /month [N] - Month's (or last N months) NAV variation\n"
+        "📅 /year [YYYY|N] - Year's (or last N years) NAV variation\n"
         "📊 /flex [PARAM] - Manual Flex Report (PARAM: monthly|YYYYMMDD)\n"
         "⚠️ /delta - Check high delta short positions now\n"
         "❓ /help - Show this help message"
