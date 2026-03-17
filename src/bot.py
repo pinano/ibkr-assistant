@@ -440,7 +440,11 @@ async def cmd_max(m: types.Message):
             r = await client.get(f"{settings.WEB_SERVICE_URL}/account/summary", headers=API_HEADERS)
             r.raise_for_status()
             realtime_data = r.json()
-            curr_val = float(realtime_data.get('NetLiquidation', 0))
+            raw_nav = realtime_data.get('NetLiquidation')
+            if raw_nav is not None and float(raw_nav) > 0:
+                curr_val = float(raw_nav)
+            else:
+                curr_val = None
 
             # 2. Get Max NAV from DB
             session = SessionLocal()
@@ -498,7 +502,9 @@ async def cmd_today(m: types.Message):
                 r = await client.get(f"{settings.WEB_SERVICE_URL}/account/summary", headers=API_HEADERS)
                 if r.status_code == 200:
                     realtime_data = r.json()
-                    curr_val = float(realtime_data.get('NetLiquidation', 0))
+                    raw_nav = realtime_data.get('NetLiquidation')
+                    if raw_nav is not None and float(raw_nav) > 0:
+                        curr_val = float(raw_nav)
             except Exception as e:
                 logger.warning(f"Could not fetch real-time NAV: {e}")
 
@@ -625,7 +631,9 @@ async def cmd_year(m: types.Message):
                 r = await client.get(f"{settings.WEB_SERVICE_URL}/account/summary", headers=API_HEADERS)
                 if r.status_code == 200:
                     realtime_data = r.json()
-                    curr_val = float(realtime_data.get('NetLiquidation', 0))
+                    raw_nav = realtime_data.get('NetLiquidation')
+                    if raw_nav is not None and float(raw_nav) > 0:
+                        curr_val = float(raw_nav)
             except Exception as e:
                 logger.warning(f"Could not fetch real-time NAV: {e}")
 
@@ -747,7 +755,9 @@ async def cmd_month(m: types.Message):
                 r = await client.get(f"{settings.WEB_SERVICE_URL}/account/summary", headers=API_HEADERS)
                 if r.status_code == 200:
                     realtime_data = r.json()
-                    curr_val = float(realtime_data.get('NetLiquidation', 0))
+                    raw_nav = realtime_data.get('NetLiquidation')
+                    if raw_nav is not None and float(raw_nav) > 0:
+                        curr_val = float(raw_nav)
             except Exception as e:
                 logger.warning(f"Could not fetch real-time NAV: {e}")
 
@@ -872,7 +882,9 @@ async def cmd_week(m: types.Message):
                 r = await client.get(f"{settings.WEB_SERVICE_URL}/account/summary", headers=API_HEADERS)
                 if r.status_code == 200:
                     realtime_data = r.json()
-                    curr_val = float(realtime_data.get('NetLiquidation', 0))
+                    raw_nav = realtime_data.get('NetLiquidation')
+                    if raw_nav is not None and float(raw_nav) > 0:
+                        curr_val = float(raw_nav)
             except Exception as e:
                 logger.warning(f"Could not fetch real-time NAV: {e}")
 
