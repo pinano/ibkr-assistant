@@ -1,3 +1,7 @@
+## v2026.06.03.1 (2026-06-03)
+
+- chore: temporary commit to test release incrementing (9e37562)
+
 ## v2026.06.03 (2026-06-03)
 
 - feat: implement CalVer release and versioning system (21b8df7)
