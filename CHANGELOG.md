@@ -1,3 +1,7 @@
+## v2026.06.03.2 (2026-06-03)
+
+- chore: make git fetch failure graceful in update and rollback scripts (83d2e0a)
+
 ## v2026.06.03.1 (2026-06-03)
 
 - chore: temporary commit to test release incrementing (9e37562)
