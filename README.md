@@ -76,7 +76,7 @@ Configuration is managed in `.env` (generated from `.env.dist`). Key variables:
 
 | Variable | Default | Description |
 | :--- | :--- | :--- |
-| `PROJECT_ID` | `ib` | Unique prefix for container names |
+| `PROJECT_NAME` | `ib` | Unique prefix for container names |
 | `IB_FLEX_SCHEDULE_TIME` | `07:30` | Time to run the daily Flex Query |
 | `IB_FLEX_DAILY_QUERY_ID` | — | Your daily Flex Query ID |
 | `IB_FLEX_MONTHLY_QUERY_ID` | — | Monthly Flex Query ID (runs 1st of each month at 12:00) |
@@ -167,7 +167,7 @@ You can run multiple independent instances on the same machine (e.g., for differ
 
 1.  Clone or copy the project into a new directory.
 2.  Run `make init`.
-3.  Set a unique `PROJECT_ID` (e.g., `ib2`).
+3.  Set a unique `PROJECT_NAME` (e.g., `ib2`).
 4.  Set a unique `MARIADB_HOST_PORT` (e.g., `3307`) to avoid port conflicts.
 5.  Configure unique credentials.
 6.  Start with `make start`.

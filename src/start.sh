@@ -70,11 +70,11 @@ if [ -f ".env" ]; then
     fi
 fi
 
-# 3. Load PROJECT_ID from .env
+# 3. Load PROJECT_NAME from .env
 if [ -f ".env" ]; then
-    PROJECT_ID=$(grep "^PROJECT_ID=" .env | cut -d= -f2-)
+    PROJECT_NAME=$(grep "^PROJECT_NAME=" .env | cut -d= -f2-)
 fi
-PROJECT_ID=${PROJECT_ID:-ibkr}
+PROJECT_NAME=${PROJECT_NAME:-ibkr}
 
 # 4. Start Services
 echo "Starting Docker services..."

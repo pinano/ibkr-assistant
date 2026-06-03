@@ -1315,7 +1315,7 @@ async def scheduled_flex_report(
                 return
 
         # Run blocking email sending in a thread
-        project_prefix = settings.PROJECT_ID.upper()
+        project_prefix = settings.PROJECT_NAME.upper()
         if report_type == "Monthly":
             subject = f"{project_prefix} - IB Flex Query {date_range_subject}"
         else:

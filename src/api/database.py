@@ -16,7 +16,7 @@ if not db_url:
     db_pass = os.environ.get("DB_PASSWORD")
     db_name = os.environ.get("DB_NAME", "ibkr")
     if db_user and db_pass:
-        db_url = f"mysql+pymysql://{db_user}:{db_pass}@{settings.PROJECT_ID}-db/{db_name}"
+        db_url = f"mysql+pymysql://{db_user}:{db_pass}@{settings.PROJECT_NAME}-db/{db_name}"
         logger.info("Constructed DB_URL from individual components")
 
 if not db_url:

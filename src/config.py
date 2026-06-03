@@ -3,7 +3,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     # Project Configuration
-    PROJECT_ID: str = "ib"
+    PROJECT_NAME: str = "ib"
 
     # IBKR Connection (Required by API, optional for Bot)
     IB_PORT: int = 4003
@@ -11,7 +11,7 @@ class Settings(BaseSettings):
 
     @property
     def IB_HOST(self) -> str:
-        return f"{self.PROJECT_ID}-gateway"
+        return f"{self.PROJECT_NAME}-gateway"
 
     # API Security
     API_KEY: str
@@ -29,7 +29,7 @@ class Settings(BaseSettings):
 
     @property
     def WEB_SERVICE_URL(self) -> str:
-        return f"http://{self.PROJECT_ID}-api:8000"
+        return f"http://{self.PROJECT_NAME}-api:8000"
 
     @property
     def allowed_ids_list(self) -> list[int]:

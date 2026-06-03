@@ -3,7 +3,7 @@ services:
   ibkr-gateway:
     image: gnzsnz/ib-gateway:stable
     restart: always
-    container_name: ${PROJECT_ID}-gateway
+    container_name: ${PROJECT_NAME}-gateway
     environment:
       - TWS_USERID=${IB_USER}
       - TWS_PASSWORD=${IB_PASS}
@@ -30,7 +30,7 @@ services:
   ibkr-db:
     image: mariadb:12.3.2
     restart: always
-    container_name: ${PROJECT_ID}-db
+    container_name: ${PROJECT_NAME}-db
     command: --default-time-zone=${TZ}
     environment:
       TZ: ${TZ}
@@ -56,18 +56,18 @@ services:
     build: .
     image: ibkr-app:latest
     restart: always
-    container_name: ${PROJECT_ID}-api
+    container_name: ${PROJECT_NAME}-api
     user: "${USER_ID}:${GROUP_ID}"
     environment:
       - TZ=${TZ}
-      - PROJECT_ID=${PROJECT_ID}
+      - PROJECT_NAME=${PROJECT_NAME}
       - DB_USER=${DB_USER}
       - DB_PASS=${DB_PASS}
       - DB_NAME=${DB_NAME}
       - IB_PORT=${IB_PORT}
       - IB_CLIENT_ID=${IB_CLIENT_ID}
       - API_KEY=${API_KEY}
-      - DB_URL=mysql+pymysql://${DB_USER}:${DB_PASS}@${PROJECT_ID}-db/${DB_NAME}
+      - DB_URL=mysql+pymysql://${DB_USER}:${DB_PASS}@${PROJECT_NAME}-db/${DB_NAME}
     depends_on:
       ibkr-db:
         condition: service_healthy
@@ -82,21 +82,21 @@ services:
     labels:
       - "traefik.enable=true"
       - "traefik.docker.network=traefik"
-      - "traefik.http.services.${PROJECT_ID}-api.loadbalancer.server.port=8000"
+      - "traefik.http.services.${PROJECT_NAME}-api.loadbalancer.server.port=8000"
 
   ibkr-bot:
     image: ibkr-app:latest
     restart: always
-    container_name: ${PROJECT_ID}-bot
+    container_name: ${PROJECT_NAME}-bot
     user: "${USER_ID}:${GROUP_ID}"
     command: python -m src.bot
     environment:
       - TZ=${TZ}
-      - PROJECT_ID=${PROJECT_ID}
+      - PROJECT_NAME=${PROJECT_NAME}
       - TELEGRAM_TOKEN=${TG_TOKEN}
       - TELEGRAM_ALLOWED_IDS=${TG_ALLOWED_IDS}
       - API_KEY=${API_KEY}
-      - DB_URL=mysql+pymysql://${DB_USER}:${DB_PASS}@${PROJECT_ID}-db/${DB_NAME}
+      - DB_URL=mysql+pymysql://${DB_USER}:${DB_PASS}@${PROJECT_NAME}-db/${DB_NAME}
       - CASH_DIFFERENCE_CHECK_INTERVAL=${CASH_DIFFERENCE_CHECK_INTERVAL}
       - DELTA_ALERT_TIMES=${DELTA_ALERT_TIMES}
       - DELTA_ALERT_THRESHOLD=${DELTA_ALERT_THRESHOLD}
