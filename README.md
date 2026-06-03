@@ -1,5 +1,9 @@
 # IBKR Portfolio Manager & Monitor
 
+<p align="center">
+  <img src="docs/images/ibkr-astronaut-badge.png" width="180" alt="IBKR Mission Control Badge">
+</p>
+
 A robust monitoring and management stack for Interactive Brokers (IBKR). This project provides a companion API for IBKR Gateway, a Telegram bot for real-time monitoring, and automated database logging for account history and currency balances.
 
 ## 🚀 Key Features
