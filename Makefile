@@ -226,6 +226,13 @@ ctop: ## View container metrics with ctop
 		--volume /var/run/docker.sock:/var/run/docker.sock:ro \
 		elswork/ctop:latest -f "$$PROJECT_NAME"
 
+##@help check-updates
+## Scans compose files and audits registries for newer Docker image tags.
+## Filters tags matching the current tag's flavor (e.g. alpine, slim, stable).
+.PHONY: check-updates
+check-updates: ## Check for Docker image updates
+	@python3 scripts/check-image-updates.py
+
 ##@help clean
 ## Removes dangling/untagged Docker images (<none>) to free disk space.
 .PHONY: clean
