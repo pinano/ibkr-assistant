@@ -29,11 +29,6 @@ endif
 
 ifndef SKIP_MAKEFILE
 
-# Load environment variables from .env if it exists
-ifneq (,$(wildcard .env))
-    include .env
-    export
-endif
 
 # Base Docker Compose command
 COMPOSE := docker compose -f docker-compose.yaml
