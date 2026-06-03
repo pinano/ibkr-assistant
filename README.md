@@ -1,7 +1,17 @@
 # IBKR Portfolio Manager & Monitor
 
 <p align="center">
-  <img src="docs/images/ibkr-astronaut-badge.png" width="180" alt="IBKR Mission Control Badge">
+  <img src="docs/images/badge.webp" width="180" alt="IBKR Assistant Badge">
+</p>
+
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License: MIT"></a>
+  <a href="https://www.python.org"><img src="https://img.shields.io/badge/Python-3.11+-blue?logo=python&logoColor=white" alt="Python"></a>
+  <a href="https://fastapi.tiangolo.com"><img src="https://img.shields.io/badge/FastAPI-v0.100+-009688?logo=fastapi&logoColor=white" alt="FastAPI"></a>
+  <a href="https://mariadb.org"><img src="https://img.shields.io/badge/MariaDB-12.1.2-003545?logo=mariadb&logoColor=white" alt="MariaDB"></a>
+  <a href="https://docs.docker.com/compose/"><img src="https://img.shields.io/badge/Docker-Compose-blue?logo=docker&logoColor=white" alt="Docker"></a>
+  <a href="https://core.telegram.org/bots"><img src="https://img.shields.io/badge/Telegram-Bot-blue?logo=telegram&logoColor=white" alt="Telegram Bot"></a>
+  <a href="https://www.interactivebrokers.com"><img src="https://img.shields.io/badge/IBKR-Gateway-red" alt="IBKR Gateway"></a>
 </p>
 
 A robust monitoring and management stack for Interactive Brokers (IBKR). This project provides a companion API for IBKR Gateway, a Telegram bot for real-time monitoring, and automated database logging for account history and currency balances.
