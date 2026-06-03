@@ -2,7 +2,7 @@
 set -e
 
 echo "Fetching latest tags from remote repository..."
-git fetch --tags --quiet
+git fetch --tags --quiet || echo "Warning: Could not fetch tags from remote, using local tags."
 
 echo "Recent versions:"
 TAGS=($(git tag -l --sort=-v:refname | head -n 10))

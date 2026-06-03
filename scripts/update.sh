@@ -4,7 +4,7 @@ set -e
 TARGET_TAG=$1
 
 echo "Fetching latest tags from remote repository..."
-git fetch --tags --quiet
+git fetch --tags --quiet || echo "Warning: Could not fetch tags from remote, using local tags."
 
 if [ -n "$TARGET_TAG" ]; then
     # Add 'v' prefix if missing
