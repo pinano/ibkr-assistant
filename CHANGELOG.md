@@ -1,3 +1,18 @@
+## v2026.06.03.3 (2026-06-03)
+
+- chore: move PROJECT_ID configuration to the top of .env.dist (5862f3d)
+- chore: set default PROJECT_ID to 999 in .env.dist (9903552)
+- feat: use PROJECT_ID to dynamically map Mariadb port as 33${PROJECT_ID} (7b371f2)
+- refactor: rename PROJECT_ID to PROJECT_NAME consistently across configuration, scripts, API and bot (44e941a)
+- fix: remove env export from Makefile to avoid CRLF import bugs in child docker compose processes (2ae7bda)
+- refactor: remove pyyaml dependency and implement regex-based parsing for docker-compose images (1f40aca)
+- chore: upgrade mariadb image to version 12.3.2 (d73cd6f)
+- feat: add make check-updates target and check-image-updates.py script (2ece1da)
+- docs: add technology badges under the main badge and use badge.webp (5ac94d0)
+- docs: update astronaut badge tagline to IBKR ASSISTANT (0e9480c)
+- docs: add IBKR astronaut mission control badge to README header (6f55e1a)
+- chore: remove temporary test commit file (f0aa819)
+
 ## v2026.06.03.2 (2026-06-03)
 
 - chore: make git fetch failure graceful in update and rollback scripts (83d2e0a)
