@@ -6,13 +6,7 @@ import urllib.request
 import urllib.error
 import json
 
-# Check for yaml module
-try:
-    import yaml
-except ImportError:
-    print("❌ Error: Missing required dependency 'pyyaml'.", file=sys.stderr)
-    print("👉 Please install it using: pip install pyyaml", file=sys.stderr)
-    sys.exit(1)
+# No external dependencies (completely standard library)
 
 # Regex to parse semantic version parts
 SEMVER_REGEX = re.compile(r'^v?(\d+)(?:\.(\d+))?(?:\.(\d+))?(?:\.(\d+))?(?:[-+.](.*))?$')
@@ -191,23 +185,28 @@ def scan_compose_files():
     images = {}
     pattern = re.compile(r'^docker-compose-.*\.yaml$')
     
+    # Regex to match image definitions, e.g. "image: mariadb:12.3.2"
+    image_regex = re.compile(r'^\s*image:\s*[\'"]?([^\s\'"]+)[\'"]?')
+    
     for file in sorted(os.listdir('.')):
         if not pattern.match(file) and file != 'docker-compose.yaml':
             continue
         
         try:
             with open(file, 'r', encoding='utf-8') as f:
-                content = yaml.safe_load(f)
-                if not content or 'services' not in content:
-                    continue
-                
-                for svc_name, svc_data in content['services'].items():
-                    if isinstance(svc_data, dict) and 'image' in svc_data:
-                        img = svc_data['image']
+                for line in f:
+                    # Strip comment portion
+                    clean_line = line.split('#')[0].strip()
+                    if not clean_line:
+                        continue
+                    
+                    match = image_regex.match(clean_line)
+                    if match:
+                        img = match.group(1)
                         if ':' in img and '${' not in img:
                             if img not in images:
                                 images[img] = []
-                            images[img].append(f"{file} ({svc_name})")
+                            images[img].append(file)
         except Exception as e:
             print(f"⚠️  Error parsing {file}: {e}", file=sys.stderr)
             
