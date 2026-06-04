@@ -1,5 +1,6 @@
 # flex.py
 import os
+import ssl
 import smtplib
 import xml.etree.ElementTree as ET
 from email.mime.multipart import MIMEMultipart
@@ -306,10 +307,11 @@ class FlexReporter:
         msg.attach(MIMEText(full_html, 'html'))
 
         try:
+            ssl_context = ssl.create_default_context()
             server = smtplib.SMTP(
                 settings.EMAIL_SMTP_SERVER,
                 settings.EMAIL_SMTP_PORT)
-            server.starttls()
+            server.starttls(context=ssl_context)
             server.login(
                 settings.EMAIL_SMTP_USER,
                 settings.EMAIL_SMTP_PASSWORD)

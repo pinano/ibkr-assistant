@@ -32,6 +32,7 @@ async def _qualify_option_contract(
         exchange,
         currency=currency)
 
+    qualified = None  # Initialize to prevent UnboundLocalError if try block raises
     try:
         qualified = await client.qualifyContractsAsync(contract)
         if qualified and qualified[0]:

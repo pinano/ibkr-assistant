@@ -2,9 +2,14 @@ import math
 import logging
 import httpx
 from datetime import datetime
+try:
+    from zoneinfo import ZoneInfo
+except ImportError:
+    from backports.zoneinfo import ZoneInfo
 
 from src.api.constants import MARKET_SUFFIXES
 from src.models import OptionGreeks
+from src.config import settings
 
 logger = logging.getLogger("ibkr-api")
 
@@ -133,11 +138,15 @@ def _snap_is_valid(snap):
 def _is_market_open():
     """
     Return True if markets are considered active.
-    Active hours: Monday-Friday, 09:00-23:00 container local time.
+    Active hours: Monday-Friday, 09:00-23:00 in the configured timezone (TZ).
     Outside this window the system serves cached data from DB without
     hitting external sources (CBOE / IBKR) unless a record is missing.
     """
-    now = datetime.now()
+    try:
+        tz = ZoneInfo(settings.TZ)
+        now = datetime.now(tz)
+    except Exception:
+        now = datetime.now()
     if now.weekday() >= 5:  # Weekend
         return False
     if now.hour < 9 or now.hour >= 23:

@@ -121,6 +121,8 @@ services:
         condition: service_healthy
       ibkr-api:
         condition: service_started
+      ibkr-gateway:
+        condition: service_healthy
     networks:
       - ibkr
 

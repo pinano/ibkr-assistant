@@ -13,7 +13,7 @@ db_url = os.environ.get("DB_URL") or settings.DB_URL
 
 if not db_url:
     db_user = os.environ.get("DB_USER")
-    db_pass = os.environ.get("DB_PASSWORD")
+    db_pass = os.environ.get("DB_PASS")
     db_name = os.environ.get("DB_NAME", "ibkr")
     if db_user and db_pass:
         db_url = f"mysql+pymysql://{db_user}:{db_pass}@{settings.PROJECT_NAME}-db/{db_name}"

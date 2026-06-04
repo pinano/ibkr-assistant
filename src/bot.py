@@ -459,22 +459,28 @@ async def cmd_max(m: types.Message):
 
                 # If current real-time NAV is higher than historical max, use
                 # current as "new high"
-                if curr_val > max_val:
+                if curr_val is not None and curr_val > max_val:
                     max_val = curr_val
                     max_date_str = "Now (Real-time)"
                 else:
                     max_date_str = max_rec.date.strftime("%Y-%m-%d %H:%M:%S")
 
-                drawdown = ((curr_val - max_val) / max_val *
-                            100) if max_val > 0 else 0
+                if curr_val is not None:
+                    drawdown = ((curr_val - max_val) / max_val *
+                                100) if max_val > 0 else 0
+                    realtime_section = (
+                        f"⚡️ *Real-time Status*\n"
+                        f"💰 NAV: `{curr_val:.2f}`\n"
+                        f"📉 Drawdown: `{drawdown:+.2f}%`"
+                    )
+                else:
+                    realtime_section = "⚠️ _Real\-time NAV unavailable_"
 
                 msg = (
                     f"🏆 *All Time High*\n"
                     f"💰 NAV: `{max_val:.2f}`\n"
                     f"📅 Date: `{max_date_str}`\n\n"
-                    f"⚡️ *Real-time Status*\n"
-                    f"💰 NAV: `{curr_val:.2f}`\n"
-                    f"📉 Drawdown: `{drawdown:+.2f}%`"
+                    + realtime_section
                 )
                 await m.answer(msg, parse_mode="Markdown")
             finally:
@@ -1420,12 +1426,13 @@ async def cmd_delta(m: types.Message):
                 await m.answer("✅ No short option positions found.")
                 return
 
-            # Fetch Greeks for each short option
-            results = []
-            for opt in short_options:
+            # Fetch Greeks for all short options in parallel (max 3 concurrent)
+            semaphore = asyncio.Semaphore(3)
+
+            async def fetch_one_delta(opt):
                 con_id = opt.get('conId', 0)
                 if not con_id:
-                    continue
+                    return None
 
                 underlying = opt.get('underlying', '??')
                 right = opt.get('right', '?')
@@ -1438,38 +1445,39 @@ async def cmd_delta(m: types.Message):
                 delta = None
                 age_str = ""
 
-                try:
-                    params = {
-                        'underlying': underlying,
-                        'expiry': expiry,
-                        'strike': strike,
-                        'right': right,
-                        'conId': con_id
-                    }
-                    r = await client.get(
-                        f"{settings.WEB_SERVICE_URL}/option/greeks",
-                        params=params, headers=API_HEADERS
-                    )
-                    if r.status_code == 200:
-                        data = r.json()
-                        raw_delta = data.get('delta', 0.0)
-                        if abs(raw_delta) >= 0.0001:
-                            delta = raw_delta
+                async with semaphore:
+                    try:
+                        params = {
+                            'underlying': underlying,
+                            'expiry': expiry,
+                            'strike': strike,
+                            'right': right,
+                            'conId': con_id
+                        }
+                        r = await client.get(
+                            f"{settings.WEB_SERVICE_URL}/option/greeks",
+                            params=params, headers=API_HEADERS
+                        )
+                        if r.status_code == 200:
+                            data = r.json()
+                            raw_delta = data.get('delta', 0.0)
+                            if abs(raw_delta) >= 0.0001:
+                                delta = raw_delta
 
-                        # Calculate data age in minutes
-                        last_date_str = data.get('last_date')
-                        if last_date_str:
-                            try:
-                                last_dt = datetime.strptime(last_date_str, "%Y-%m-%d %H:%M:%S")
-                                age_min = int((datetime.now() - last_dt).total_seconds() / 60)
-                                age_str = f"{age_min}m"
-                            except (ValueError, TypeError):
-                                pass
-                except Exception as e:
-                    logger.debug(
-                        f"Error fetching greeks for conId={con_id}: {e}")
+                            # Calculate data age in minutes
+                            last_date_str = data.get('last_date')
+                            if last_date_str:
+                                try:
+                                    last_dt = datetime.strptime(last_date_str, "%Y-%m-%d %H:%M:%S")
+                                    age_min = int((datetime.now() - last_dt).total_seconds() / 60)
+                                    age_str = f"{age_min}m"
+                                except (ValueError, TypeError):
+                                    pass
+                    except Exception as e:
+                        logger.debug(
+                            f"Error fetching greeks for conId={con_id}: {e}")
 
-                results.append({
+                return {
                     'underlying': underlying,
                     'right_strike': f"{right}{strike_fmt}",
                     'expiry': exp_fmt,
@@ -1477,7 +1485,11 @@ async def cmd_delta(m: types.Message):
                     'qty': abs(qty),
                     'high': delta is not None and abs(delta) > settings.DELTA_ALERT_THRESHOLD,
                     'age': age_str
-                })
+                }
+
+            fetch_tasks = [fetch_one_delta(opt) for opt in short_options]
+            raw_results = await asyncio.gather(*fetch_tasks)
+            results = [r for r in raw_results if r is not None]
 
             if not results:
                 await m.answer("✅ No short option positions found.")
@@ -1586,6 +1598,7 @@ async def main():
                      ) if check_interval_min < 60 else {0}
     effective_check_mins = check_mins - snap_mins
 
+    check_cron = None  # Initialize before conditional to avoid potential UnboundLocalError
     if effective_check_mins:
         check_cron = ",".join(map(str, sorted(effective_check_mins)))
         scheduler.add_job(
