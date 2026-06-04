@@ -1,3 +1,7 @@
+## v2026.06.04.1 (2026-06-04)
+
+- refactor: consolidate parsing logic into new parsing module and increase snapshot retention period (379e9e6)
+
 ## v2026.06.04 (2026-06-04)
 
 - refactor: improve security, timezone handling, and parallelize greek data fetching (68d33c9)
