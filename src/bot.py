@@ -104,83 +104,80 @@ async def check_and_archive(force_insert: bool = False):
             currencies = r_curr.json() if r_curr.status_code == 200 else []
 
             # 3. DB Operations
-            session = SessionLocal()
             try:
-                # Map currencies for quick lookup
-                curr_map = {c['currency']: c['amount'] for c in currencies}
+                with SessionLocal() as session:
+                    # Map currencies for quick lookup
+                    curr_map = {c['currency']: c['amount'] for c in currencies}
 
-                # Get previous cash balance for change detection
-                last_record = session.query(CashBalance).order_by(
-                    CashBalance.date.desc()).first()
+                    # Get previous cash balance for change detection
+                    last_record = session.query(CashBalance).order_by(
+                        CashBalance.date.desc()).first()
 
-                # Create new record (but don't add to session yet)
-                new_record = CashBalance(
-                    nav=summary['NetLiquidation'],
-                    stock=summary['StockMarketValue'],
-                    pnl=summary['UnrealizedPnL'],
-                    base=summary['TotalCashValue'],
-                    eur=curr_map.get('EUR', 0.0),
-                    usd=curr_map.get('USD', 0.0),
-                    gbp=curr_map.get('GBP', 0.0),
-                    chf=curr_map.get('CHF', 0.0),
-                    sek=curr_map.get('SEK', 0.0),
-                    cushion=summary['Cushion'],
-                    buyingPower=summary['BuyingPower'],
-                    excessLiq=summary['ExcessLiquidity'],
-                    maintMargin=summary['FullMaintMargin']
-                )
-
-                # Check for alerts using the previous record
-                alerts = []
-                cash_changed = False
-                if last_record:
-                    for curr in ['eur', 'usd', 'gbp', 'chf', 'sek']:
-                        old_val = float(getattr(last_record, curr) or 0.0)
-                        new_val = float(getattr(new_record, curr) or 0.0)
-
-                        if new_val != old_val:
-                            cash_changed = True
-                            diff = new_val - old_val
-                            sign = "+" if diff > 0 else "-"
-                            abs_diff = abs(diff)
-
-                            # Emoji mapping
-                            curr_upper = curr.upper()
-                            emoji = EMOJI_MAP.get(curr_upper, "💰")
-
-                            alert = (
-                                f"<code>{curr_upper} {emoji} {diff:+.4f}</code>\n"
-                                f"<code>{old_val:.4f} {sign} {abs_diff:.4f} = {new_val:.4f}</code>"
-                            )
-                            alerts.append(alert)
-
-                # Only insert to DB if:
-                # 1. Cash balance has changed, OR
-                # 2. force_insert is True (periodic snapshot)
-                should_insert = cash_changed or force_insert
-
-                if should_insert:
-                    session.add(new_record)
-                    session.commit()
-                    if cash_changed:
-                        logger.info(
-                            "DB record inserted due to cash balance change")
-                    else:
-                        logger.info("DB record inserted (periodic snapshot)")
-                else:
-                    logger.debug("No DB insert - no cash changes detected")
-
-                if alerts:
-                    await notify_admins(
-                        "💰 <b>Cash balance change:</b>\n" + "\n".join(alerts),
-                        parse_mode="HTML"
+                    # Create new record (but don't add to session yet)
+                    new_record = CashBalance(
+                        nav=summary['NetLiquidation'],
+                        stock=summary['StockMarketValue'],
+                        pnl=summary['UnrealizedPnL'],
+                        base=summary['TotalCashValue'],
+                        eur=curr_map.get('EUR', 0.0),
+                        usd=curr_map.get('USD', 0.0),
+                        gbp=curr_map.get('GBP', 0.0),
+                        chf=curr_map.get('CHF', 0.0),
+                        sek=curr_map.get('SEK', 0.0),
+                        cushion=summary['Cushion'],
+                        buyingPower=summary['BuyingPower'],
+                        excessLiq=summary['ExcessLiquidity'],
+                        maintMargin=summary['FullMaintMargin']
                     )
+
+                    # Check for alerts using the previous record
+                    alerts = []
+                    cash_changed = False
+                    if last_record:
+                        for curr in ['eur', 'usd', 'gbp', 'chf', 'sek']:
+                            old_val = float(getattr(last_record, curr) or 0.0)
+                            new_val = float(getattr(new_record, curr) or 0.0)
+
+                            if new_val != old_val:
+                                cash_changed = True
+                                diff = new_val - old_val
+                                sign = "+" if diff > 0 else "-"
+                                abs_diff = abs(diff)
+
+                                # Emoji mapping
+                                curr_upper = curr.upper()
+                                emoji = EMOJI_MAP.get(curr_upper, "💰")
+
+                                alert = (
+                                    f"<code>{curr_upper} {emoji} {diff:+.4f}</code>\n"
+                                    f"<code>{old_val:.4f} {sign} {abs_diff:.4f} = {new_val:.4f}</code>"
+                                )
+                                alerts.append(alert)
+
+                    # Only insert to DB if:
+                    # 1. Cash balance has changed, OR
+                    # 2. force_insert is True (periodic snapshot)
+                    should_insert = cash_changed or force_insert
+
+                    if should_insert:
+                        session.add(new_record)
+                        session.commit()
+                        if cash_changed:
+                            logger.info(
+                                "DB record inserted due to cash balance change")
+                        else:
+                            logger.info("DB record inserted (periodic snapshot)")
+                    else:
+                        logger.debug("No DB insert - no cash changes detected")
+
+                    if alerts:
+                        await notify_admins(
+                            "💰 <b>Cash balance change:</b>\n" + "\n".join(alerts),
+                            parse_mode="HTML"
+                        )
 
             except Exception as e:
                 logger.error(f"DB/Logic Error: {e}")
-                session.rollback()
-            finally:
-                session.close()
 
     except Exception as e:
         logger.error(f"Monitoring Job Error: {e}")
@@ -447,8 +444,7 @@ async def cmd_max(m: types.Message):
                 curr_val = None
 
             # 2. Get Max NAV from DB
-            session = SessionLocal()
-            try:
+            with SessionLocal() as session:
                 max_rec = session.query(CashBalance).order_by(
                     CashBalance.nav.desc()).first()
                 if not max_rec:
@@ -474,7 +470,7 @@ async def cmd_max(m: types.Message):
                         f"📉 Drawdown: `{drawdown:+.2f}%`"
                     )
                 else:
-                    realtime_section = "⚠️ _Real\-time NAV unavailable_"
+                    realtime_section = r"⚠️ _Real\-time NAV unavailable_"
 
                 msg = (
                     f"🏆 *All Time High*\n"
@@ -483,8 +479,6 @@ async def cmd_max(m: types.Message):
                     + realtime_section
                 )
                 await m.answer(msg, parse_mode="Markdown")
-            finally:
-                session.close()
 
         except httpx.HTTPStatusError as e:
             err_detail = e.response.text or str(e)
@@ -515,8 +509,7 @@ async def cmd_today(m: types.Message):
                 logger.warning(f"Could not fetch real-time NAV: {e}")
 
             # 2. Query data from DB
-            session = SessionLocal()
-            try:
+            with SessionLocal() as session:
                 args = m.text.split()
                 n_days = None
                 if len(args) > 1:
@@ -601,8 +594,6 @@ async def cmd_today(m: types.Message):
                 )
 
                 await m.answer(msg, parse_mode="Markdown")
-            finally:
-                session.close()
 
         except Exception as e:
             logger.error(f"Error in cmd_today: {e}", exc_info=True)
@@ -644,8 +635,7 @@ async def cmd_year(m: types.Message):
                 logger.warning(f"Could not fetch real-time NAV: {e}")
 
             # 2. Query year data from DB
-            session = SessionLocal()
-            try:
+            with SessionLocal() as session:
                 now_dt = get_now().replace(tzinfo=None)
                 if years_back is not None:
                     try:
@@ -740,8 +730,6 @@ async def cmd_year(m: types.Message):
                 )
 
                 await m.answer(msg, parse_mode="Markdown")
-            finally:
-                session.close()
 
         except Exception as e:
             logger.error(f"Error in cmd_year: {e}", exc_info=True)
@@ -768,8 +756,7 @@ async def cmd_month(m: types.Message):
                 logger.warning(f"Could not fetch real-time NAV: {e}")
 
             # 2. Query data from DB
-            session = SessionLocal()
-            try:
+            with SessionLocal() as session:
                 args = m.text.split()
                 n_months = None
                 if len(args) > 1:
@@ -868,8 +855,6 @@ async def cmd_month(m: types.Message):
                 )
 
                 await m.answer(msg, parse_mode="Markdown")
-            finally:
-                session.close()
 
         except Exception as e:
             logger.error(f"Error in cmd_month: {e}", exc_info=True)
@@ -894,8 +879,7 @@ async def cmd_week(m: types.Message):
             except Exception as e:
                 logger.warning(f"Could not fetch real-time NAV: {e}")
 
-            session = SessionLocal()
-            try:
+            with SessionLocal() as session:
                 args = m.text.split()
                 n_weeks = None
                 if len(args) > 1:
@@ -981,8 +965,6 @@ async def cmd_week(m: types.Message):
                 )
 
                 await m.answer(msg, parse_mode="Markdown")
-            finally:
-                session.close()
 
         except Exception as e:
             logger.error(f"Error in cmd_week: {e}", exc_info=True)

@@ -18,46 +18,40 @@ class Monitor:
         """Delete option snapshots older than retention period."""
         from src.models import OptionSnapshot
         logger.info(f"Pruning option snapshots older than {days_retention} days...")
-        session = self.SessionLocal()
         try:
-            cutoff_date = datetime.datetime.now() - datetime.timedelta(days=days_retention)
-            logger.info(f"Cutoff date for pruning: {cutoff_date}")
-            
-            # Use synchronize_session=False for performance on bulk delete
-            deleted_count = session.query(OptionSnapshot).filter(
-                OptionSnapshot.updated_at < cutoff_date
-            ).delete()
-            session.commit()
-            if deleted_count > 0:
-                logger.info(f"Pruned {deleted_count} old option snapshots (updated before {cutoff_date.strftime('%Y-%m-%d %H:%M')}).")
-            else:
-                logger.info("No old snapshots found to prune.")
+            with self.SessionLocal() as session:
+                cutoff_date = datetime.datetime.now() - datetime.timedelta(days=days_retention)
+                logger.info(f"Cutoff date for pruning: {cutoff_date}")
+                
+                # Use synchronize_session=False for performance on bulk delete
+                deleted_count = session.query(OptionSnapshot).filter(
+                    OptionSnapshot.updated_at < cutoff_date
+                ).delete()
+                session.commit()
+                if deleted_count > 0:
+                    logger.info(f"Pruned {deleted_count} old option snapshots (updated before {cutoff_date.strftime('%Y-%m-%d %H:%M')}).")
+                else:
+                    logger.info("No old snapshots found to prune.")
         except Exception as e:
             logger.error(f"Error pruning snapshots: {e}")
-            session.rollback()
-        finally:
-            session.close()
 
     async def prune_old_market_cache(self, days_retention=7):
         """Delete market cache entries older than retention period."""
         from src.models import MarketCache
         logger.info(f"Pruning market cache older than {days_retention} days...")
-        session = self.SessionLocal()
         try:
-            cutoff_date = datetime.datetime.now() - datetime.timedelta(days=days_retention)
-            deleted_count = session.query(MarketCache).filter(
-                MarketCache.updated_at < cutoff_date
-            ).delete()
-            session.commit()
-            if deleted_count > 0:
-                logger.info(f"Pruned {deleted_count} old market cache entries.")
-            else:
-                logger.info("No old market cache entries to prune.")
+            with self.SessionLocal() as session:
+                cutoff_date = datetime.datetime.now() - datetime.timedelta(days=days_retention)
+                deleted_count = session.query(MarketCache).filter(
+                    MarketCache.updated_at < cutoff_date
+                ).delete()
+                session.commit()
+                if deleted_count > 0:
+                    logger.info(f"Pruned {deleted_count} old market cache entries.")
+                else:
+                    logger.info("No old market cache entries to prune.")
         except Exception as e:
             logger.error(f"Error pruning market cache: {e}")
-            session.rollback()
-        finally:
-            session.close()
 
     async def check_alerts(self):
         from src.bot import notify_admins

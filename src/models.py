@@ -118,7 +118,7 @@ Base = declarative_base()
 class CashBalance(Base):
     __tablename__ = 'balances'
     id = Column(Integer, primary_key=True)
-    date = Column(DateTime, default=datetime.now)
+    date = Column(DateTime, default=datetime.now, index=True)
     nav = Column(Numeric(18, 4))
     stock = Column(Numeric(18, 4))
     pnl = Column(Numeric(18, 4), default=0.0)
