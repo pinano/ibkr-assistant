@@ -142,7 +142,7 @@ class OptionSnapshot(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     conId = Column(Integer, index=True)
-    symbol = Column(String(100), index=True)  # e.g. "RMS 260220 P 1860"
+    symbol = Column(String(100), unique=True)  # e.g. "RMS 260220 P 1860" — one row per option (UPSERT)
     updated_at = Column(DateTime, default=datetime.now)
 
     # Market Data

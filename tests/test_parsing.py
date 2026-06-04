@@ -1,85 +1,32 @@
 """
-Unit tests for pure helper functions in src/api/helpers.py:
+Unit tests for pure helper functions in src/parsing.py:
 - parse_symbol: Market suffix and exchange prefix resolution
-- _greeks_are_valid: Greeks validation logic
-- _snap_is_valid: OptionSnapshot cache validation
+- greeks_are_valid: Greeks validation logic
+- snap_is_valid: OptionSnapshot cache validation
+- parse_osi_symbol: OSI-format option symbol parsing
+- parse_european_symbol: European IBKR localSymbol parsing
+
+All functions are imported directly from the production module — no inline copies.
 """
-import math
 import sys
 import os
 import pytest
 
 # Allow importing from src/ without installing as a package
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-# Import only the pure functions we can test without IBKR/DB dependencies
-# We import the module-level dicts and functions directly to avoid
-# triggering FastAPI/SQLAlchemy/IB initialization.
-
-# --- Inline copies of pure functions for isolated testing ---
-# (avoids importing src/api/ which triggers DB connections and IB() init)
-
-MARKET_SUFFIXES = {
-    ".L": ("LSE", "GBP"),
-    ".DE": ("IBIS", "EUR"),
-    ".PA": ("SBF", "EUR"),
-    ".AS": ("AEB", "EUR"),
-    ".SW": ("EBS", "CHF"),
-    ".MC": ("BM", "EUR"),
-    ".MI": ("BVME", "EUR"),
-}
-
-EXCHANGE_PREFIXES = {
-    "EPA": ("MONEP", "EUR"),
-    "AMS": ("FTA", "EUR"),
-    "ETR": ("DTB", "EUR"),
-    "FRA": ("DTB", "EUR"),
-    "LON": ("LSE", "GBP"),
-    "SWX": ("EBS", "CHF"),
-    "MC":  ("MEFF", "EUR"),
-    "MCE": ("MEFF", "EUR"),
-}
+from src.parsing import (
+    parse_symbol,
+    greeks_are_valid,
+    snap_is_valid,
+    parse_osi_symbol,
+    parse_european_symbol,
+)
 
 
-def parse_symbol(symbol: str) -> tuple:
-    symbol = symbol.upper().strip()
-    for suffix, (exchange, currency) in MARKET_SUFFIXES.items():
-        if symbol.endswith(suffix.upper()):
-            ticker = symbol[:-len(suffix)]
-            return (ticker, exchange, currency)
-    return (symbol, "SMART", "USD")
-
-
-def _greeks_are_valid(g, und_price_override=None):
-    if not g:
-        return False
-
-    def _safe(val):
-        return val if (val is not None and not math.isnan(val)) else 0.0
-
-    delta = _safe(g.delta)
-    gamma = _safe(g.gamma)
-    theta = _safe(g.theta)
-    vega = _safe(g.vega)
-
-    if delta == 0 and gamma == 0 and theta == 0 and vega == 0:
-        return False
-    return True
-
-
-def _snap_is_valid(snap):
-    if not snap:
-        return False
-    d = snap.delta or 0.0
-    g = snap.gamma or 0.0
-    t = snap.theta or 0.0
-    v = snap.vega or 0.0
-    if d == 0 and g == 0 and t == 0 and v == 0:
-        return False
-    return True
-
-
-# --- Helpers for test data ---
+# ---------------------------------------------------------------------------
+# Helpers for test data
+# ---------------------------------------------------------------------------
 
 class FakeGreeks:
     """Mimics ib_async OptionGreeks with named attributes."""
@@ -162,46 +109,46 @@ class TestParseSymbol:
 
 
 # ======================================================================
-# _greeks_are_valid tests
+# greeks_are_valid tests
 # ======================================================================
 
 class TestGreeksAreValid:
-    """Tests for _greeks_are_valid — validates market data quality."""
+    """Tests for greeks_are_valid — validates market data quality."""
 
     def test_none_is_invalid(self):
-        assert _greeks_are_valid(None) is False
+        assert greeks_are_valid(None) is False
 
     def test_all_zero_is_invalid(self):
         g = FakeGreeks(delta=0, gamma=0, theta=0, vega=0)
-        assert _greeks_are_valid(g) is False
+        assert greeks_are_valid(g) is False
 
     def test_only_delta_is_valid(self):
         g = FakeGreeks(delta=0.5)
-        assert _greeks_are_valid(g) is True
+        assert greeks_are_valid(g) is True
 
     def test_only_theta_is_valid(self):
         g = FakeGreeks(theta=-0.05)
-        assert _greeks_are_valid(g) is True
+        assert greeks_are_valid(g) is True
 
     def test_only_gamma_is_valid(self):
         g = FakeGreeks(gamma=0.01)
-        assert _greeks_are_valid(g) is True
+        assert greeks_are_valid(g) is True
 
     def test_only_vega_is_valid(self):
         g = FakeGreeks(vega=0.1)
-        assert _greeks_are_valid(g) is True
+        assert greeks_are_valid(g) is True
 
     def test_full_greeks_valid(self):
         g = FakeGreeks(delta=0.45, gamma=0.02, theta=-0.03, vega=0.15)
-        assert _greeks_are_valid(g) is True
+        assert greeks_are_valid(g) is True
 
     def test_nan_delta_treated_as_zero(self):
         g = FakeGreeks(delta=float('nan'), gamma=0, theta=0, vega=0)
-        assert _greeks_are_valid(g) is False
+        assert greeks_are_valid(g) is False
 
     def test_nan_with_valid_gamma(self):
         g = FakeGreeks(delta=float('nan'), gamma=0.01)
-        assert _greeks_are_valid(g) is True
+        assert greeks_are_valid(g) is True
 
     def test_none_values_treated_as_zero(self):
         g = FakeGreeks()
@@ -209,32 +156,32 @@ class TestGreeksAreValid:
         g.gamma = None
         g.theta = None
         g.vega = None
-        assert _greeks_are_valid(g) is False
+        assert greeks_are_valid(g) is False
 
     def test_mixed_none_and_valid(self):
         g = FakeGreeks()
         g.delta = None
         g.gamma = 0.02
-        assert _greeks_are_valid(g) is True
+        assert greeks_are_valid(g) is True
 
 
 # ======================================================================
-# _snap_is_valid tests
+# snap_is_valid tests
 # ======================================================================
 
 class TestSnapIsValid:
-    """Tests for _snap_is_valid — validates cached snapshot quality."""
+    """Tests for snap_is_valid — validates cached snapshot quality."""
 
     def test_none_is_invalid(self):
-        assert _snap_is_valid(None) is False
+        assert snap_is_valid(None) is False
 
     def test_all_zero_is_invalid(self):
         s = FakeSnap(delta=0, gamma=0, theta=0, vega=0)
-        assert _snap_is_valid(s) is False
+        assert snap_is_valid(s) is False
 
     def test_has_delta_is_valid(self):
         s = FakeSnap(delta=-0.3)
-        assert _snap_is_valid(s) is True
+        assert snap_is_valid(s) is True
 
     def test_none_values_treated_as_zero(self):
         s = FakeSnap()
@@ -242,51 +189,21 @@ class TestSnapIsValid:
         s.gamma = None
         s.theta = None
         s.vega = None
-        assert _snap_is_valid(s) is False
+        assert snap_is_valid(s) is False
 
     def test_mixed_valid_and_none(self):
         s = FakeSnap()
         s.delta = None
         s.vega = 0.1
-        assert _snap_is_valid(s) is True
+        assert snap_is_valid(s) is True
 
 
 # ======================================================================
-# OSI option symbol parsing tests (inline logic from get_option_risk)
+# parse_osi_symbol tests
 # ======================================================================
-
-def parse_osi_symbol(symbol: str) -> dict:
-    """
-    Extract components from an OSI-format option symbol.
-    e.g. 'ASTS  260109P00065000' -> {ticker, expiry, strike, right}
-    """
-    symbol_clean = symbol.replace(' ', '')
-    strike = float(symbol_clean[-8:]) / 1000.0
-    right = symbol_clean[-9]
-    expiry_raw = symbol_clean[-15:-9]
-    expiry = f"20{expiry_raw[0:2]}{expiry_raw[2:4]}{expiry_raw[4:6]}"
-    ticker = symbol_clean[:-15].strip()
-    return {"ticker": ticker, "expiry": expiry, "strike": strike, "right": right}
-
-
-def parse_european_symbol(symbol: str) -> dict:
-    """
-    Extract components from a European-format option symbol.
-    e.g. 'P HMI  20260220 1900 M' -> {right, ticker, expiry, strike}
-    """
-    parts = symbol.split()
-    if len(parts) < 4:
-        raise ValueError(f"Invalid European format: {symbol}")
-    return {
-        "right": parts[0],
-        "ticker": parts[1],
-        "expiry": parts[2],
-        "strike": float(parts[3]),
-    }
-
 
 class TestOSISymbolParsing:
-    """Tests for OSI option symbol parsing."""
+    """Tests for parse_osi_symbol — OSI-format option symbols."""
 
     def test_basic_osi(self):
         r = parse_osi_symbol("ASTS  260109P00065000")
@@ -316,8 +233,12 @@ class TestOSISymbolParsing:
         assert r["strike"] == 5000.0
 
 
+# ======================================================================
+# parse_european_symbol tests
+# ======================================================================
+
 class TestEuropeanSymbolParsing:
-    """Tests for European-format option symbol parsing."""
+    """Tests for parse_european_symbol — IBKR localSymbol format."""
 
     def test_basic_put(self):
         r = parse_european_symbol("P HMI  20260220 1900 M")

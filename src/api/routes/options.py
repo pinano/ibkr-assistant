@@ -19,6 +19,7 @@ from src.api.helpers import (
     _snap_is_valid,
     _is_market_open,
 )
+from src.parsing import parse_osi_symbol, parse_european_symbol
 from src.models import OptionGreeks, OptionSnapshot, OptionChainItem
 
 logger = logging.getLogger("ibkr-api")
@@ -161,11 +162,19 @@ async def get_option_greeks(
                     logger.info(f"Fetched Greeks from CBOE for {underlying} {expiry} {strike} {right}")
 
                     try:
-                        snap = OptionSnapshot(conId=conId or 0)
-                        db.add(snap)
-
                         db_symbol = f"{underlying} {expiry} {strike} {right}"
-                        snap.symbol = db_symbol
+                        snap = db.query(OptionSnapshot).filter(
+                            OptionSnapshot.symbol == db_symbol
+                        ).first()
+                        if snap is None:
+                            snap = OptionSnapshot(symbol=db_symbol)
+                            db.add(snap)
+
+                        # Update conId if we now have a real one
+                        if conId:
+                            snap.conId = conId
+                        elif snap.conId is None:
+                            snap.conId = 0
 
                         snap.updated_at = datetime.now()
                         snap.delta = cboe_data.delta
@@ -387,10 +396,14 @@ async def get_option_greeks(
 
         if should_save:
             cid = qualified[0].conId
-            snap = OptionSnapshot(conId=cid)
-            db.add(snap)
+            snap = db.query(OptionSnapshot).filter(
+                OptionSnapshot.symbol == display_symbol
+            ).first()
+            if snap is None:
+                snap = OptionSnapshot(symbol=display_symbol)
+                db.add(snap)
+            snap.conId = cid  # Always update: may have been 0 from a prior CBOE save
 
-            snap.symbol = display_symbol
             snap.updated_at = datetime.now()
             snap.delta = safe_float(g.delta) if g else 0.0
             snap.gamma = safe_float(g.gamma) if g else 0.0
@@ -479,14 +492,17 @@ async def get_option_risk(symbol: str):
             currency = prefix_currency
 
         if is_european_format:
-            parts = symbol.split()
-            if len(parts) < 4:
-                raise HTTPException(status_code=400, detail=f"Invalid option symbol format: {symbol}")
+            try:
+                parsed = parse_european_symbol(symbol)
+            except ValueError:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Invalid option symbol format: {symbol}")
 
-            right = parts[0]
-            raw_ticker = parts[1]
-            expiry = parts[2]
-            strike_val = float(parts[3])
+            right = parsed["right"]
+            raw_ticker = parsed["ticker"]
+            expiry = parsed["expiry"]
+            strike_val = parsed["strike"]
 
             if not prefix_currency:
                 ticker, exchange, currency = parse_symbol(raw_ticker)
@@ -496,12 +512,11 @@ async def get_option_risk(symbol: str):
             if currency == "USD" and '.' not in raw_ticker and not prefix_currency:
                 currency = "EUR"
         else:
-            symbol_clean = symbol.replace(' ', '')
-            strike_val = float(symbol_clean[-8:]) / 1000.0
-            right = symbol_clean[-9]
-            expiry_raw = symbol_clean[-15:-9]
-            expiry = f"20{expiry_raw[0:2]}{expiry_raw[2:4]}{expiry_raw[4:6]}"
-            raw_ticker = symbol_clean[:-15].strip()
+            parsed = parse_osi_symbol(symbol)
+            strike_val = parsed["strike"]
+            right = parsed["right"]
+            expiry = parsed["expiry"]
+            raw_ticker = parsed["ticker"]
 
             if prefix_currency:
                 ticker = raw_ticker

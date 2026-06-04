@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <style>
+    body {
+      font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      line-height: 1.6;
+      color: #333;
+      max-width: 800px;
+      margin: 0 auto;
+      padding: 20px;
+      background-color: #f9f9f9;
+    }
+    .container {
+      background-color: #fff;
+      padding: 40px;
+      border-radius: 8px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+    }
+    h1 {
+      color: #1a73e8;
+      border-bottom: 2px solid #e8f0fe;
+      padding-bottom: 10px;
+    }
+    h2 {
+      color: #3c4043;
+      margin-top: 30px;
+      border-bottom: 1px solid #eee;
+      padding-bottom: 5px;
+    }
+    h3 {
+      color: #5f6368;
+    }
+    code {
+      background-color: #f1f3f4;
+      padding: 2px 5px;
+      border-radius: 4px;
+      font-family: 'Consolas', 'Monaco', monospace;
+      font-size: 0.9em;
+    }
+    pre {
+      background-color: #202124;
+      color: #e8eaed;
+      padding: 15px;
+      border-radius: 6px;
+      overflow-x: auto;
+    }
+    .badge {
+      display: inline-block;
+      padding: 3px 10px;
+      border-radius: 12px;
+      font-size: 0.85em;
+      font-weight: bold;
+      margin-right: 5px;
+    }
+    .badge-blue { background-color: #e8f0fe; color: #1a73e8; }
+    .badge-green { background-color: #e6f4ea; color: #1e8e3e; }
+    ul { padding-left: 20px; }
+    li { margin-bottom: 8px; }
+    .footer {
+      margin-top: 50px;
+      font-size: 0.85em;
+      color: #70757a;
+      text-align: center;
+      font-style: italic;
+    }
+    .warning {
+      background-color: #fef7e0;
+      border-left: 5px solid #f9ab00;
+      padding: 15px;
+      margin: 20px 0;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Financial Options Tracker</h1>
+    <p>A professional-grade Google Sheets system for tracking financial options, featuring automated Greeks, real-time underlying quotes, and historical/live FX rate management.</p>
+
+    <h2>🚀 Key Features</h2>
+    <ul>
+      <li><strong>Automated Greeks:</strong> Fetches Delta, Gamma, Theta, IV, Volume, and Open Interest using CBOE (American) and IBKR (European) APIs.</li>
+      <li><strong>Real-time Quotes:</strong> Updates underlying stock prices using a high-performance Google Finance workaround.</li>
+      <li><strong>Smart FX Management:</strong> 
+        <ul>
+          <li>Live rates for open positions.</li>
+          <li>Historical rates for closed positions (based on the close date).</li>
+          <li>Permanent caching via <code>PropertiesService</code>.</li>
+        </ul>
+      </li>
+      <li><strong>Enhanced UI:</strong> Expiry date gradients, automatic row formatting, smart sorting, and a toggle to hide/show closed operations.</li>
+    </ul>
+
+    <h2>📂 Project Structure</h2>
+    <ul>
+      <li><span class="badge badge-blue">core.gs</span> The central engine. API logic and batch updaters.</li>
+      <li><span class="badge badge-green">ui.gs</span> User interface, menus, and visual helpers.</li>
+    </ul>
+
+    <h2>🛠️ Configuration</h2>
+    <p>All settings are at the top of <code>core.gs</code>.</p>
+    
+    <h3>1. API Keys</h3>
+    <ul>
+      <li><strong>IBKR:</strong> Required for European options. Set <code>IBKR_CONFIG.API_KEY</code>.</li>
+      <li><strong>CBOE:</strong> Public API for American options.</li>
+    </ul>
+
+    <h3>2. Sheet Setup</h3>
+    <p>Expected sheet name: <strong>"Opciones"</strong>.</p>
+    <ul>
+      <li><strong>Col AJ:</strong> OCC String (Input)</li>
+      <li><strong>Col AL:</strong> Is Closed? (Boolean)</li>
+      <li><strong>Col P-W:</strong> Greeks Output</li>
+      <li><strong>Col M:</strong> FX Rate Output</li>
+    </ul>
+
+    <h2>⚙️ Automation</h2>
+    <p>Install triggers via the <strong>⚙️ Utilities</strong> menu:</p>
+    <ul>
+      <li><strong>Quotes:</strong> Every 5 minutes.</li>
+      <li><strong>Greeks:</strong> Every 15 minutes.</li>
+      <li><strong>FX:</strong> Every 15 minutes.</li>
+    </ul>
+
+    <div class="warning">
+      <h3>📋 FX Backfill Mode</h3>
+      <p>To recalculate historical rates for old rows:</p>
+      <ol>
+        <li>Set <code>FX_CONFIG.BACKFILL_CLOSED: true</code> in <code>core.gs</code>.</li>
+        <li>Run <strong>Update FX Now</strong>.</li>
+        <li>Revert to <code>false</code> once finished.</li>
+      </ol>
+    </div>
+
+    <div class="footer">
+      Developed for high-performance options portfolio tracking.
+    </div>
+  </div>
+</body>
+</html>

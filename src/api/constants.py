@@ -1,22 +1,6 @@
-# Market suffix mappings for international stocks
-MARKET_SUFFIXES = {
-    ".L": ("LSE", "GBP"),      # London Stock Exchange
-    ".DE": ("IBIS", "EUR"),    # Germany (Xetra)
-    ".PA": ("SBF", "EUR"),     # France (Euronext Paris)
-    ".AS": ("AEB", "EUR"),     # Netherlands (Amsterdam)
-    ".SW": ("EBS", "CHF"),     # Switzerland
-    ".MC": ("BM", "EUR"),      # Spain (Madrid)
-    ".MI": ("BVME", "EUR"),    # Italy (Milan)
-}
+# src/api/constants.py
+# Re-exports from src.parsing for backward compatibility.
+# The authoritative definitions live in src/parsing.py.
+from src.parsing import MARKET_SUFFIXES, EXCHANGE_PREFIXES
 
-# Exchange Prefix Mapping (Google Finance / Yahoo Finance style -> IBKR)
-EXCHANGE_PREFIXES = {
-    "EPA": ("MONEP", "EUR"),    # Paris -> MONEP
-    "AMS": ("FTA", "EUR"),      # Amsterdam -> FTA
-    "ETR": ("DTB", "EUR"),      # Xetra -> DTB (Eurex)
-    "FRA": ("DTB", "EUR"),      # Frankfurt -> DTB
-    "LON": ("LSE", "GBP"),      # London
-    "SWX": ("EBS", "CHF"),      # SWX -> EBS (Swiss)
-    "MC":  ("MEFF", "EUR"),     # Madrid -> MEFF
-    "MCE": ("MEFF", "EUR"),     # Madrid (alternative)
-}
+__all__ = ["MARKET_SUFFIXES", "EXCHANGE_PREFIXES"]

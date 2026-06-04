@@ -1,4 +1,3 @@
-import math
 import logging
 import httpx
 from datetime import datetime
@@ -7,32 +6,16 @@ try:
 except ImportError:
     from backports.zoneinfo import ZoneInfo
 
-from src.api.constants import MARKET_SUFFIXES
+from src.parsing import (
+    parse_symbol,
+    greeks_are_valid as _greeks_are_valid,
+    snap_is_valid as _snap_is_valid,
+)
 from src.models import OptionGreeks
 from src.config import settings
 
 logger = logging.getLogger("ibkr-api")
 
-
-def parse_symbol(symbol: str) -> tuple:
-    """
-    Parse a symbol with optional market suffix.
-    Returns (ticker, exchange, currency).
-
-    Examples:
-        'AAPL' -> ('AAPL', 'SMART', 'USD')
-        'BATS.L' -> ('BATS', 'LSE', 'GBP')
-        'RMS.PA' -> ('RMS', 'SBF', 'EUR')
-    """
-    symbol = symbol.upper().strip()
-
-    for suffix, (exchange, currency) in MARKET_SUFFIXES.items():
-        if symbol.endswith(suffix.upper()):
-            ticker = symbol[:-len(suffix)]
-            return (ticker, exchange, currency)
-
-    # Default: US stock
-    return (symbol, "SMART", "USD")
 
 
 async def _fetch_cboe_greeks(ticker: str, expiry: str, strike: float, right: str):
@@ -100,39 +83,6 @@ async def _fetch_cboe_greeks(ticker: str, expiry: str, strike: float, right: str
         logger.debug(f"CBOE Fetch failed for {ticker}: {e}")
         return None
 
-
-def _greeks_are_valid(g, und_price_override=None):
-    """Return True if the Greeks data is meaningful enough to cache.
-
-    Requires at least one non-zero Greek (delta, gamma, theta, or vega).
-    """
-    if not g:
-        return False
-
-    def _safe(val):
-        return val if (val is not None and not math.isnan(val)) else 0.0
-
-    delta = _safe(g.delta)
-    gamma = _safe(g.gamma)
-    theta = _safe(g.theta)
-    vega = _safe(g.vega)
-
-    if delta == 0 and gamma == 0 and theta == 0 and vega == 0:
-        return False
-    return True
-
-
-def _snap_is_valid(snap):
-    """Return True if a cached OptionSnapshot has meaningful Greeks."""
-    if not snap:
-        return False
-    d = snap.delta or 0.0
-    g = snap.gamma or 0.0
-    t = snap.theta or 0.0
-    v = snap.vega or 0.0
-    if d == 0 and g == 0 and t == 0 and v == 0:
-        return False
-    return True
 
 
 def _is_market_open():

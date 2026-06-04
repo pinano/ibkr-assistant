@@ -14,7 +14,7 @@ class Monitor:
         # Cache for global alerts to avoid spam: {symbol: last_alert_time}
         self.global_alert_cache = {}
 
-    async def prune_old_snapshots(self, days_retention=7):
+    async def prune_old_snapshots(self, days_retention=30):
         """Delete option snapshots older than retention period."""
         from src.models import OptionSnapshot
         logger.info(f"Pruning option snapshots older than {days_retention} days...")
