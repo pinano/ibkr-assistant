@@ -1,3 +1,7 @@
+## v2026.06.04 (2026-06-04)
+
+- refactor: improve security, timezone handling, and parallelize greek data fetching (68d33c9)
+
 ## v2026.06.03.3 (2026-06-03)
 
 - chore: move PROJECT_ID configuration to the top of .env.dist (5862f3d)
