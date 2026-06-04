@@ -1,3 +1,7 @@
+## v2026.06.04.2 (2026-06-04)
+
+- refactor: replace manual database session management with context managers across all modules (f4a2c26)
+
 ## v2026.06.04.1 (2026-06-04)
 
 - refactor: consolidate parsing logic into new parsing module and increase snapshot retention period (379e9e6)
