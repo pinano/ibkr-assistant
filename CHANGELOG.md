@@ -1,3 +1,7 @@
+## v2026.06.05.1 (2026-06-05)
+
+- chore: update database bind IP in .env.dist template (6415b41)
+
 ## v2026.06.05 (2026-06-05)
 
 - feat: make MariaDB host binding configurable via DB_BIND_IP environment variable (8de8921)
