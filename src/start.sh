@@ -63,7 +63,7 @@ if [ -f ".env" ]; then
     done < "$ENV_FILE"
 
     mv "$TEMP_ENV" "$ENV_FILE"
-    chmod 600 "$ENV_FILE"
+    chmod 644 "$ENV_FILE"
     
     if [ $ADDED -gt 0 ]; then
         echo "Successfully added $ADDED new variable(s) to .env"

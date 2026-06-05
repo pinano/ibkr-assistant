@@ -149,7 +149,7 @@ def main():
     with open(ENV_FILE, 'w', encoding='utf-8') as f:
         f.writelines(final_lines)
     
-    os.chmod(ENV_FILE, 0o600)
+    os.chmod(ENV_FILE, 0o644)
     print(f"SUCCESS! {ENV_FILE} has been updated.")
 
 if __name__ == "__main__":
