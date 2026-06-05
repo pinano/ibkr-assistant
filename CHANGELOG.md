@@ -1,3 +1,7 @@
+## v2026.06.05.2 (2026-06-05)
+
+- chore: update .env file permissions to 644 for improved accessibility (c959943)
+
 ## v2026.06.05.1 (2026-06-05)
 
 - chore: update database bind IP in .env.dist template (6415b41)
