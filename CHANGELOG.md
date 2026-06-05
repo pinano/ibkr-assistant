@@ -1,3 +1,7 @@
+## v2026.06.05 (2026-06-05)
+
+- feat: make MariaDB host binding configurable via DB_BIND_IP environment variable (8de8921)
+
 ## v2026.06.04.2 (2026-06-04)
 
 - refactor: replace manual database session management with context managers across all modules (f4a2c26)
