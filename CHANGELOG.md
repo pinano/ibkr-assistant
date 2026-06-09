@@ -1,3 +1,7 @@
+## v2026.06.09.1 (2026-06-09)
+
+- refactor: simplify date formatting logic and update display formats for historical data (17cf2d2)
+
 ## v2026.06.09 (2026-06-09)
 
 - fix: adjust whitespace formatting for option premium display in bot output (c86d8e6)
