@@ -134,7 +134,8 @@ class Monitor:
 
                 # Skip tickers excluded from alerts (e.g. box spreads)
                 underlying = opt.get('underlying', '')
-                if underlying.upper() in settings.delta_alert_exclude_list:
+                if (underlying.upper() in settings.delta_alert_exclude_list or
+                        underlying.split(':')[-1].upper() in settings.delta_alert_exclude_list):
                     continue
 
                 delta = data.get('delta', 0.0)

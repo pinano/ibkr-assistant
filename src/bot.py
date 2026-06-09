@@ -1589,7 +1589,10 @@ async def cmd_delta(m: types.Message):
             short_options = [
                 p for p in positions
                 if p.get('secType') == 'OPT' and p.get('qty', 0) < 0
-                and p.get('underlying', '').upper() not in settings.delta_alert_exclude_list
+                and not (
+                    p.get('underlying', '').upper() in settings.delta_alert_exclude_list or
+                    p.get('underlying', '').split(':')[-1].upper() in settings.delta_alert_exclude_list
+                )
             ]
 
             if not short_options:
