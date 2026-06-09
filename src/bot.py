@@ -1730,24 +1730,20 @@ async def cmd_delta(m: types.Message):
                     delta_str = "  —  "
                 else:
                     marker = "🔴" if r['high'] else "🟢"
-                    delta_str = f"{abs(r['delta']):.2f}".replace("0.", ".")
+                    delta_str = f"{abs(r['delta']):.2f}"
                 qty_str = f"{r['qty']:.0f}".rjust(max_qty)
                 und_padded = r['underlying'].ljust(max_und)
                 rs_padded = r['right_strike'].ljust(max_rs)
                 age = r['age']
 
-                # Format expiry to DDMMM (current year) or DDMMMyy (future/past years)
+                # Format expiry to DDMMMyy for consistent alignment (e.g. 19Jun26)
                 display_expiry = r['expiry']
                 if len(display_expiry) == 8 and display_expiry.isdigit():
                     try:
                         dt = datetime.strptime(display_expiry, "%Y%m%d")
-                        now_dt = get_now()
                         months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
                         month_str = months[dt.month - 1]
-                        if dt.year == now_dt.year:
-                            display_expiry = f"{dt.day:02d}{month_str}"
-                        else:
-                            display_expiry = f"{dt.day:02d}{month_str}{dt.year % 100:02d}"
+                        display_expiry = f"{dt.day:02d}{month_str}{dt.year % 100:02d}"
                     except Exception:
                         pass
 
@@ -1770,7 +1766,7 @@ async def cmd_delta(m: types.Message):
                 option_lines.append(line.strip())
 
             options_text = "\n".join(option_lines)
-            message = f"{header}\n{options_text}\n\n🔴 abs(Δ) &gt; {settings.DELTA_ALERT_THRESHOLD}  🟢 abs(Δ) ≤ {settings.DELTA_ALERT_THRESHOLD}  ⚪ no data\n⚠️ low TV (≤ 1% strike)"
+            message = f"{header}\n{options_text}\n\n🔴 abs(Δ) &gt; {settings.DELTA_ALERT_THRESHOLD}  🟢 abs(Δ) ≤ {settings.DELTA_ALERT_THRESHOLD}  ⚪ no data\n⚠️ low time value (≤ 1% strike)"
 
             await m.answer(message, parse_mode="HTML")
 
