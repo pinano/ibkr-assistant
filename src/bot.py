@@ -1708,7 +1708,7 @@ async def cmd_delta(m: types.Message):
             if no_data_count:
                 header += f"⚪ <b>{no_data_count} without delta data</b>\n"
 
-            lines = [header]
+            option_lines = []
             for r in results:
                 if r['delta'] is None:
                     marker = "⚪"
@@ -1733,13 +1733,14 @@ async def cmd_delta(m: types.Message):
                     if r['intrinsic'] > 0 and r['time_value'] <= (0.01 * r['strike']):
                         low_tv_warning = " ⚠️"
                         
-                    line += f"\n    <code>  Prem. {r['last_price']:.2f} Intr.V {iv_str} TimeV {tv_str}</code>{low_tv_warning}"
+                    line += f"\n<blockquote><code>Prem. {r['last_price']:.2f} Intr.V {iv_str} TimeV {tv_str}</code>{low_tv_warning}</blockquote>"
 
-                lines.append(line.strip())
+                option_lines.append(line.strip())
 
-            lines.append(f"\n🔴 abs(Δ) &gt; {settings.DELTA_ALERT_THRESHOLD}  🟢 abs(Δ) ≤ {settings.DELTA_ALERT_THRESHOLD}  ⚪ no data")
+            options_text = "\n\n".join(option_lines)
+            message = f"{header}\n{options_text}\n\n🔴 abs(Δ) &gt; {settings.DELTA_ALERT_THRESHOLD}  🟢 abs(Δ) ≤ {settings.DELTA_ALERT_THRESHOLD}  ⚪ no data"
 
-            await m.answer("\n".join(lines), parse_mode="HTML")
+            await m.answer(message, parse_mode="HTML")
 
     except Exception as e:
         logger.error(f"Error in /delta: {e}", exc_info=True)
