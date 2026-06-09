@@ -132,6 +132,11 @@ class Monitor:
                 if qty >= 0:
                     continue
 
+                # Skip tickers excluded from alerts (e.g. box spreads)
+                underlying = opt.get('underlying', '')
+                if underlying.upper() in settings.delta_alert_exclude_list:
+                    continue
+
                 delta = data.get('delta', 0.0)
                 # Ignore if delta is effectively zero (no data)
                 if abs(delta) < 0.0001:

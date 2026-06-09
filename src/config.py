@@ -26,6 +26,7 @@ class Settings(BaseSettings):
     DB_INSERT_INTERVAL: int = 1800
     DELTA_ALERT_TIMES: str = "10:00,16:00,22:30"
     DELTA_ALERT_THRESHOLD: float = 0.25
+    DELTA_ALERT_EXCLUDE: str = ""  # Comma-separated list of underlying tickers to exclude from delta alerts
 
     @property
     def WEB_SERVICE_URL(self) -> str:
@@ -40,6 +41,13 @@ class Settings(BaseSettings):
                     for x in self.TELEGRAM_ALLOWED_IDS.split(",") if x.strip()]
         except ValueError:
             return []
+
+    @property
+    def delta_alert_exclude_list(self) -> list[str]:
+        """Tickers excluded from automated delta alerts (e.g. box spreads)."""
+        if not self.DELTA_ALERT_EXCLUDE:
+            return []
+        return [x.strip().upper() for x in self.DELTA_ALERT_EXCLUDE.split(",") if x.strip()]
 
     # Flex Query & Email (Only required by Bot)
     IB_FLEX_TOKEN: str = ""
