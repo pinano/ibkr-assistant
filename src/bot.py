@@ -1709,6 +1709,20 @@ async def cmd_delta(m: types.Message):
             if no_data_count:
                 header += f"⚪ <b>{no_data_count} without delta data</b>\n"
 
+            # Calculate TV strings first to determine max_tv
+            for r in results:
+                r['tv_str'] = ""
+                r['low_tv'] = False
+                if r['intrinsic'] is not None and r['time_value'] is not None:
+                    tv_val = f"{r['time_value']:+.2f}".replace("+0.", "+.").replace("-0.", "-.")
+                    r['tv_str'] = f"TV{tv_val}"
+                    if r['intrinsic'] > 0 and r['time_value'] <= (0.01 * r['strike']):
+                        r['low_tv'] = True
+
+            has_any_tv = any(r['tv_str'] != "" for r in results)
+            max_tv = max(len(r['tv_str']) for r in results if r['tv_str'] != "") if has_any_tv else 0
+            has_any_low_tv = any(r['low_tv'] for r in results)
+
             option_lines = []
             for r in results:
                 if r['delta'] is None:
@@ -1737,24 +1751,21 @@ async def cmd_delta(m: types.Message):
                     except Exception:
                         pass
 
-                line = f"{marker} <code>{qty_str} {und_padded} {rs_padded} {display_expiry} Δ{delta_str} {age}</code>"
+                # Append TV column if available
+                tv_part = ""
+                if has_any_tv:
+                    tv_padded = r['tv_str'].ljust(max_tv)
+                    if has_any_low_tv:
+                        warning_indicator = "⚠️" if r['low_tv'] else "  "
+                        tv_part = f" {tv_padded}{warning_indicator}"
+                    else:
+                        tv_part = f" {tv_padded}"
 
-                # Append intrinsic / time value if available
-                if r['intrinsic'] is not None and r['time_value'] is not None:
-                    iv_str = f"{r['intrinsic']:.2f}"
-                    tv_str = f"{r['time_value']:+.2f}"
-                    
-                    # Highlight low Time Value (ITM and <= 1% of strike price)
-                    low_tv_warning = ""
-                    if r['intrinsic'] > 0 and r['time_value'] <= (0.01 * r['strike']):
-                        low_tv_warning = " ⚠️"
-                        
-                    line += f"\n<blockquote><code>Prem. {r['last_price']:.2f} Intr.V {iv_str} TimeV {tv_str}</code>{low_tv_warning}</blockquote>"
-
+                line = f"{marker} <code>{qty_str} {und_padded} {rs_padded} {display_expiry} Δ{delta_str}{tv_part} {age}</code>"
                 option_lines.append(line.strip())
 
             options_text = "\n".join(option_lines)
-            message = f"{header}\n{options_text}\n\n🔴 abs(Δ) &gt; {settings.DELTA_ALERT_THRESHOLD}  🟢 abs(Δ) ≤ {settings.DELTA_ALERT_THRESHOLD}  ⚪ no data"
+            message = f"{header}\n{options_text}\n\n🔴 abs(Δ) &gt; {settings.DELTA_ALERT_THRESHOLD}  🟢 abs(Δ) ≤ {settings.DELTA_ALERT_THRESHOLD}  ⚪ no data  ⚠️ low TV (≤ 1% strike)"
 
             await m.answer(message, parse_mode="HTML")
 
