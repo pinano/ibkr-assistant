@@ -1,13 +1,21 @@
 import asyncio
+import io
 import logging
+import math
 import httpx
+from collections import defaultdict
 from datetime import datetime, timedelta
 try:
     from zoneinfo import ZoneInfo
 except ImportError:
     from backports.zoneinfo import ZoneInfo
+import matplotlib
+matplotlib.use("Agg")  # headless backend — no display required
+import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
+from aiogram.types import BufferedInputFile
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -41,6 +49,147 @@ bot = Bot(token=settings.TELEGRAM_TOKEN)
 dp = Dispatcher()
 scheduler = AsyncIOScheduler()
 monitor = Monitor(SessionLocal)
+
+
+# ---------------------------------------------------------------------------
+# NAV chart helpers
+# ---------------------------------------------------------------------------
+
+MAX_CHART_POINTS = 150  # Target number of points after downsampling
+
+
+def _query_nav_series(
+    session, start: datetime, end: datetime
+) -> list[tuple[datetime, float]]:
+    """
+    Return all (date, nav) records in [start, end], ordered ascending.
+    Used by all NAV chart commands to fetch the raw time series.
+    """
+    rows = (
+        session.query(CashBalance)
+        .filter(CashBalance.date >= start, CashBalance.date <= end)
+        .order_by(CashBalance.date.asc())
+        .all()
+    )
+    return [(r.date, float(r.nav)) for r in rows if r.nav is not None]
+
+
+def _build_nav_chart(
+    series: list[tuple[datetime, float]],
+    period_name: str,
+) -> bytes:
+    """
+    Build a NAV evolution chart from a time series and return PNG bytes.
+
+    Downsamples to MAX_CHART_POINTS using uniform time-bucket aggregation
+    (last value per bucket). X-axis format and line color are chosen
+    automatically based on the time range and performance.
+
+    Must be called via asyncio.to_thread — matplotlib is blocking.
+    """
+    if len(series) < 2:
+        raise ValueError("Not enough data points to build a chart")
+
+    # --- Adaptive downsampling -------------------------------------------
+    if len(series) > MAX_CHART_POINTS:
+        t0 = series[0][0].timestamp()
+        t1 = series[-1][0].timestamp()
+        bucket_size = (t1 - t0) / MAX_CHART_POINTS
+
+        buckets: dict[int, list[tuple[datetime, float]]] = defaultdict(list)
+        for dt, nav in series:
+            idx = int((dt.timestamp() - t0) / bucket_size)
+            # Clamp to avoid off-by-one at the very end
+            idx = min(idx, MAX_CHART_POINTS - 1)
+            buckets[idx].append((dt, nav))
+
+        # Keep the last value in each bucket (most recent snapshot)
+        series = [bucket[-1] for _, bucket in sorted(buckets.items())]
+
+    dates = [dt for dt, _ in series]
+    navs = [nav for _, nav in series]
+
+    # --- X-axis format auto-detection ------------------------------------
+    total_seconds = (dates[-1] - dates[0]).total_seconds()
+    total_days = total_seconds / 86_400
+
+    if total_days < 2:
+        date_fmt = "%H:%M"
+    elif total_days < 14:
+        date_fmt = "%m/%d"
+    elif total_days < 90:
+        date_fmt = "%b %d"
+    elif total_days < 730:
+        date_fmt = "%b '%y"
+    else:
+        date_fmt = "%Y"
+
+    # --- Color based on performance --------------------------------------
+    color = "#4CAF50" if navs[-1] >= navs[0] else "#EF5350"
+    fill_color = color
+
+    # --- Plot -----------------------------------------------------------
+    fig, ax = plt.subplots(figsize=(8, 3.2))
+    fig.patch.set_facecolor("#1e1e2e")
+    ax.set_facecolor("#1e1e2e")
+
+    ax.plot(dates, navs, linewidth=1.8, color=color, zorder=3)
+    ax.fill_between(dates, navs, min(navs), alpha=0.25, color=fill_color, zorder=2)
+
+    # Axes styling
+    ax.xaxis.set_major_formatter(mdates.DateFormatter(date_fmt))
+    fig.autofmt_xdate(rotation=30, ha="right")
+    ax.yaxis.set_major_formatter(
+        plt.FuncFormatter(lambda x, _: f"{x:,.0f}")
+    )
+    for spine in ax.spines.values():
+        spine.set_edgecolor("#444466")
+    ax.tick_params(colors="#aaaacc", labelsize=8)
+    ax.yaxis.label.set_color("#aaaacc")
+    ax.set_title(
+        f"NAV — {period_name}",
+        color="#ccccee",
+        fontsize=10,
+        pad=6,
+    )
+    ax.grid(axis="y", linestyle="--", linewidth=0.5, color="#333355", alpha=0.7)
+
+    fig.tight_layout(pad=0.8)
+
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", dpi=120, facecolor=fig.get_facecolor())
+    plt.close(fig)
+    buf.seek(0)
+    return buf.getvalue()
+
+
+async def _send_nav_chart(
+    m: types.Message,
+    series: list[tuple[datetime, float]],
+    period_name: str,
+    caption: str,
+    parse_mode: str = "Markdown",
+) -> bool:
+    """
+    Generate and send a NAV chart photo with caption.
+    Returns True if the photo was sent, False on failure (caller falls back).
+    """
+    if len(series) < 2:
+        return False
+    try:
+        chart_bytes = await asyncio.to_thread(_build_nav_chart, series, period_name)
+        await m.answer_photo(
+            BufferedInputFile(chart_bytes, filename="nav.png"),
+            caption=caption,
+            parse_mode=parse_mode,
+        )
+        return True
+    except Exception as e:
+        logger.warning(f"Chart generation failed for {period_name}: {e}")
+        return False
+
+
+# ---------------------------------------------------------------------------
 
 
 def get_now() -> datetime:
@@ -478,7 +627,20 @@ async def cmd_max(m: types.Message):
                     f"📅 Date: `{max_date_str}`\n\n"
                     + realtime_section
                 )
-                await m.answer(msg, parse_mode="Markdown")
+
+                # Attach full-history chart
+                with SessionLocal() as chart_session:
+                    series = _query_nav_series(
+                        chart_session,
+                        datetime.min,
+                        datetime.now(),
+                    )
+                if curr_val is not None:
+                    series.append((datetime.now(), curr_val))
+
+                sent = await _send_nav_chart(m, series, "All Time", msg)
+                if not sent:
+                    await m.answer(msg, parse_mode="Markdown")
 
         except httpx.HTTPStatusError as e:
             err_detail = e.response.text or str(e)
@@ -593,11 +755,18 @@ async def cmd_today(m: types.Message):
                     f"• Var:   `{range_var:+.2f}%`"
                 )
 
-                await m.answer(msg, parse_mode="Markdown")
+                # Attach chart
+                series = _query_nav_series(session, today_start, today_end)
+                if curr_val is not None:
+                    series.append((datetime.now(), curr_val))
+                sent = await _send_nav_chart(m, series, period_name, msg)
+                if not sent:
+                    await m.answer(msg, parse_mode="Markdown")
 
         except Exception as e:
             logger.error(f"Error in cmd_today: {e}", exc_info=True)
             await m.answer("❌ Error interno. Revisa los logs.")
+
 
 
 @dp.message(Command("year", ignore_case=True))
@@ -729,7 +898,13 @@ async def cmd_year(m: types.Message):
                     f"• Var:   `{range_var:+.2f}%`"
                 )
 
-                await m.answer(msg, parse_mode="Markdown")
+                # Attach chart
+                series = _query_nav_series(session, year_start, year_end)
+                if curr_val is not None and is_now:
+                    series.append((datetime.now(), curr_val))
+                sent = await _send_nav_chart(m, series, period_name, msg)
+                if not sent:
+                    await m.answer(msg, parse_mode="Markdown")
 
         except Exception as e:
             logger.error(f"Error in cmd_year: {e}", exc_info=True)
@@ -854,7 +1029,13 @@ async def cmd_month(m: types.Message):
                     f"• Var:   `{range_var:+.2f}%`"
                 )
 
-                await m.answer(msg, parse_mode="Markdown")
+                # Attach chart
+                series = _query_nav_series(session, month_start, month_end)
+                if curr_val is not None:
+                    series.append((datetime.now(), curr_val))
+                sent = await _send_nav_chart(m, series, period_name, msg)
+                if not sent:
+                    await m.answer(msg, parse_mode="Markdown")
 
         except Exception as e:
             logger.error(f"Error in cmd_month: {e}", exc_info=True)
@@ -964,7 +1145,13 @@ async def cmd_week(m: types.Message):
                     f"• Var:   `{range_var:+.2f}%`"
                 )
 
-                await m.answer(msg, parse_mode="Markdown")
+                # Attach chart
+                series = _query_nav_series(session, week_start, week_end)
+                if curr_val is not None:
+                    series.append((datetime.now(), curr_val))
+                sent = await _send_nav_chart(m, series, period_name, msg)
+                if not sent:
+                    await m.answer(msg, parse_mode="Markdown")
 
         except Exception as e:
             logger.error(f"Error in cmd_week: {e}", exc_info=True)
@@ -1426,6 +1613,8 @@ async def cmd_delta(m: types.Message):
 
                 delta = None
                 age_str = ""
+                last_price = None
+                underlying_price = None
 
                 async with semaphore:
                     try:
@@ -1446,6 +1635,14 @@ async def cmd_delta(m: types.Message):
                             if abs(raw_delta) >= 0.0001:
                                 delta = raw_delta
 
+                            # Capture price data for IV/TV calculation
+                            raw_last = data.get('last_price', 0.0)
+                            raw_und = data.get('underlying_price', 0.0)
+                            if raw_last and raw_last > 0:
+                                last_price = raw_last
+                            if raw_und and raw_und > 0:
+                                underlying_price = raw_und
+
                             # Calculate data age in minutes
                             last_date_str = data.get('last_date')
                             if last_date_str:
@@ -1459,14 +1656,31 @@ async def cmd_delta(m: types.Message):
                         logger.debug(
                             f"Error fetching greeks for conId={con_id}: {e}")
 
+                # Compute intrinsic value and time value
+                intrinsic = None
+                time_value = None
+                if last_price is not None and underlying_price is not None and strike:
+                    right_upper = right.upper()
+                    if right_upper == 'P':
+                        intrinsic = max(0.0, strike - underlying_price)
+                    else:  # Call
+                        intrinsic = max(0.0, underlying_price - strike)
+                    time_value = last_price - intrinsic
+
                 return {
                     'underlying': underlying,
+                    'right': right,
+                    'strike': strike,
                     'right_strike': f"{right}{strike_fmt}",
                     'expiry': exp_fmt,
                     'delta': delta,
                     'qty': abs(qty),
                     'high': delta is not None and abs(delta) > settings.DELTA_ALERT_THRESHOLD,
-                    'age': age_str
+                    'age': age_str,
+                    'last_price': last_price,
+                    'underlying_price': underlying_price,
+                    'intrinsic': intrinsic,
+                    'time_value': time_value,
                 }
 
             fetch_tasks = [fetch_one_delta(opt) for opt in short_options]
@@ -1507,9 +1721,15 @@ async def cmd_delta(m: types.Message):
                 rs_padded = r['right_strike'].ljust(max_rs)
                 age = r['age']
 
-                lines.append(
-                    f"{marker} <code>{qty_str} {und_padded} {rs_padded} {r['expiry']} Δ{delta_str} {age}</code>".strip()
-                )
+                line = f"{marker} <code>{qty_str} {und_padded} {rs_padded} {r['expiry']} Δ{delta_str} {age}</code>"
+
+                # Append intrinsic / time value if available
+                if r['intrinsic'] is not None and r['time_value'] is not None:
+                    iv_str = f"{r['intrinsic']:.2f}"
+                    tv_str = f"{r['time_value']:+.2f}"
+                    line += f"\n    <code>  Premium {r['last_price']:.2f}  IV {iv_str}  TV {tv_str}</code>"
+
+                lines.append(line.strip())
 
             lines.append(f"\n🔴 abs(Δ) &gt; {settings.DELTA_ALERT_THRESHOLD}  🟢 abs(Δ) ≤ {settings.DELTA_ALERT_THRESHOLD}  ⚪ no data")
 
