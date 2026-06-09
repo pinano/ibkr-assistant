@@ -29,6 +29,14 @@ endif
 
 ifndef SKIP_MAKEFILE
 
+# Define Python interpreter (prioritizes virtual environment)
+ifneq (,$(wildcard .venv/bin/python3))
+    PYTHON := .venv/bin/python3
+else ifneq (,$(wildcard venv/bin/python3))
+    PYTHON := venv/bin/python3
+else
+    PYTHON := python3
+endif
 
 # Base Docker Compose command
 COMPOSE := docker compose -f docker-compose.yaml
@@ -111,6 +119,15 @@ rollback: ## Interactively list recent versions and rollback to a specific one
 .PHONY: init
 init: ## Initialize environment configuration (.env)
 	@bash src/initialize-env.sh
+
+##@help sync
+## Synchronizes .env with .env.dist.
+## - Detects variables present in .env.dist but missing in .env and prompts to add them.
+## - Detects variables present in .env but not in .env.dist and prompts to remove them.
+## - Ensures both files remain perfectly synchronized.
+.PHONY: sync
+sync: ## Synchronize .env with .env.dist (Add missing, remove extras)
+	@$(PYTHON) scripts/validate-env.py --sync
 
 ##@ Core Lifecycle
 
