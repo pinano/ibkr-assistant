@@ -1,3 +1,11 @@
+## v2026.06.09 (2026-06-09)
+
+- fix: adjust whitespace formatting for option premium display in bot output (c86d8e6)
+- feat: add environment synchronization script and make target to manage .env consistency (89430f0)
+- feat: add configuration to exclude specific underlying tickers from delta alerts (c48e3fc)
+- feat: configure matplotlib cache directory and enhance financial reporting metrics with absolute variance values and formatted axis labels (7b846eb)
+- feat: implement NAV evolution charting using matplotlib and add AGENTS.md documentation (400de8e)
+
 ## v2026.06.05.2 (2026-06-05)
 
 - chore: update .env file permissions to 644 for improved accessibility (c959943)
