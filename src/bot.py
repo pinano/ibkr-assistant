@@ -115,14 +115,10 @@ def _build_nav_chart(
 
     if total_days < 2:
         date_fmt = "%H:%M"
-    elif total_days < 14:
-        date_fmt = "%m/%d"
     elif total_days < 90:
-        date_fmt = "%b %d"
-    elif total_days < 730:
-        date_fmt = "%b '%y"
+        date_fmt = "%d/%m"
     else:
-        date_fmt = "%Y"
+        date_fmt = "%m/%y"
 
     # --- Color based on performance --------------------------------------
     color = "#4CAF50" if navs[-1] >= navs[0] else "#EF5350"
