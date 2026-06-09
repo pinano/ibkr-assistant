@@ -1667,8 +1667,9 @@ async def cmd_delta(m: types.Message):
                         intrinsic = max(0.0, underlying_price - strike)
                     time_value = last_price - intrinsic
 
+                display_und = underlying.split(':')[-1] if ':' in underlying else underlying
                 return {
-                    'underlying': underlying,
+                    'underlying': display_und,
                     'right': right,
                     'strike': strike,
                     'right_strike': f"{right}{strike_fmt}",
@@ -1715,13 +1716,28 @@ async def cmd_delta(m: types.Message):
                     delta_str = "  —  "
                 else:
                     marker = "🔴" if r['high'] else "🟢"
-                    delta_str = f"{r['delta']:+.3f}"
+                    delta_str = f"{r['delta']:+.2f}".replace("+0.", "+.").replace("-0.", "-.")
                 qty_str = f"{r['qty']:.0f}".rjust(max_qty)
                 und_padded = r['underlying'].ljust(max_und)
                 rs_padded = r['right_strike'].ljust(max_rs)
                 age = r['age']
 
-                line = f"{marker} <code>{qty_str} {und_padded} {rs_padded} {r['expiry']} Δ{delta_str} {age}</code>"
+                # Format expiry to DDMMM (current year) or DDMMMyy (future/past years)
+                display_expiry = r['expiry']
+                if len(display_expiry) == 8 and display_expiry.isdigit():
+                    try:
+                        dt = datetime.strptime(display_expiry, "%Y%m%d")
+                        now_dt = get_now()
+                        months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+                        month_str = months[dt.month - 1]
+                        if dt.year == now_dt.year:
+                            display_expiry = f"{dt.day:02d}{month_str}"
+                        else:
+                            display_expiry = f"{dt.day:02d}{month_str}{dt.year % 100:02d}"
+                    except Exception:
+                        pass
+
+                line = f"{marker} <code>{qty_str} {und_padded} {rs_padded} {display_expiry} Δ{delta_str} {age}</code>"
 
                 # Append intrinsic / time value if available
                 if r['intrinsic'] is not None and r['time_value'] is not None:
@@ -1737,7 +1753,7 @@ async def cmd_delta(m: types.Message):
 
                 option_lines.append(line.strip())
 
-            options_text = "\n\n".join(option_lines)
+            options_text = "\n".join(option_lines)
             message = f"{header}\n{options_text}\n\n🔴 abs(Δ) &gt; {settings.DELTA_ALERT_THRESHOLD}  🟢 abs(Δ) ≤ {settings.DELTA_ALERT_THRESHOLD}  ⚪ no data"
 
             await m.answer(message, parse_mode="HTML")
