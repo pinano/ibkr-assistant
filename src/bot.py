@@ -1730,7 +1730,7 @@ async def cmd_delta(m: types.Message):
                     delta_str = "  —  "
                 else:
                     marker = "🔴" if r['high'] else "🟢"
-                    delta_str = f"{r['delta']:+.2f}".replace("+0.", "+.").replace("-0.", "-.")
+                    delta_str = f"{abs(r['delta']):.2f}".replace("0.", ".")
                 qty_str = f"{r['qty']:.0f}".rjust(max_qty)
                 und_padded = r['underlying'].ljust(max_und)
                 rs_padded = r['right_strike'].ljust(max_rs)
