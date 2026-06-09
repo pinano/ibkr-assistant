@@ -112,6 +112,7 @@ services:
       - EMAIL_SMTP_PORT=${EMAIL_SMTP_PORT}
       - EMAIL_SMTP_USER=${EMAIL_SMTP_USER}
       - EMAIL_SMTP_PASSWORD=${EMAIL_SMTP_PASSWORD}
+      - MPLCONFIGDIR=/tmp/matplotlib  # writable cache dir for non-root container user
     volumes:
       - ./src:/app/src
       - /etc/localtime:/etc/localtime:ro

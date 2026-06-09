@@ -140,7 +140,11 @@ def _build_nav_chart(
     ax.xaxis.set_major_formatter(mdates.DateFormatter(date_fmt))
     fig.autofmt_xdate(rotation=30, ha="right")
     ax.yaxis.set_major_formatter(
-        plt.FuncFormatter(lambda x, _: f"{x:,.0f}")
+        plt.FuncFormatter(lambda x, _: (
+            f"{x/1_000_000:.1f}M" if abs(x) >= 1_000_000
+            else f"{x/1_000:.0f}k" if abs(x) >= 1_000
+            else f"{x:.0f}"
+        ))
     )
     for spine in ax.spines.values():
         spine.set_edgecolor("#444466")
@@ -743,7 +747,7 @@ async def cmd_today(m: types.Message):
                     f"🏁 *Period:*\n"
                     f"• Start: `{start_nav:.2f}` ({start_date})\n"
                     f"• End:   `{end_nav:.2f}` ({end_date})\n"
-                    f"• Var:   `{period_var:+.2f}%`"
+                    f"• Var:   `{end_nav - start_nav:+.2f} ({period_var:+.2f}%)`"
                 )
 
                 msg += "\n-------------------\n"
@@ -752,7 +756,7 @@ async def cmd_today(m: types.Message):
                     f"📈 *Range:*\n"
                     f"• Min:   `{min_val:.2f}` ({min_date})\n"
                     f"• Max:   `{max_val:.2f}` ({max_date})\n"
-                    f"• Var:   `{range_var:+.2f}%`"
+                    f"• Var:   `{max_val - min_val:+.2f} ({range_var:+.2f}%)`"
                 )
 
                 # Attach chart
@@ -886,7 +890,7 @@ async def cmd_year(m: types.Message):
                     f"🏁 *Period:*\n"
                     f"• Start: `{start_nav:.2f}` ({start_date})\n"
                     f"• End:   `{end_nav:.2f}` ({end_date})\n"
-                    f"• Var:   `{period_var:+.2f}%`"
+                    f"• Var:   `{end_nav - start_nav:+.2f} ({period_var:+.2f}%)`"
                 )
 
                 msg += "\n-------------------\n"
@@ -895,7 +899,7 @@ async def cmd_year(m: types.Message):
                     f"📊 *Range:*\n"
                     f"• Min:   `{min_val:.2f}` ({min_date})\n"
                     f"• Max:   `{max_val:.2f}` ({max_date})\n"
-                    f"• Var:   `{range_var:+.2f}%`"
+                    f"• Var:   `{max_val - min_val:+.2f} ({range_var:+.2f}%)`"
                 )
 
                 # Attach chart
@@ -1017,7 +1021,7 @@ async def cmd_month(m: types.Message):
                     f"🏁 *Period:*\n"
                     f"• Start: `{start_nav:.2f}` ({start_date})\n"
                     f"• End:   `{end_nav:.2f}` ({end_date})\n"
-                    f"• Var:   `{period_var:+.2f}%`"
+                    f"• Var:   `{end_nav - start_nav:+.2f} ({period_var:+.2f}%)`"
                 )
 
                 msg += "\n-------------------\n"
@@ -1026,7 +1030,7 @@ async def cmd_month(m: types.Message):
                     f"📊 *Range:*\n"
                     f"• Min:   `{min_val:.2f}` ({min_date})\n"
                     f"• Max:   `{max_val:.2f}` ({max_date})\n"
-                    f"• Var:   `{range_var:+.2f}%`"
+                    f"• Var:   `{max_val - min_val:+.2f} ({range_var:+.2f}%)`"
                 )
 
                 # Attach chart
@@ -1133,7 +1137,7 @@ async def cmd_week(m: types.Message):
                     f"🏁 *Period:*\n"
                     f"• Start: `{start_nav:.2f}` ({start_date})\n"
                     f"• End:   `{end_nav:.2f}` ({end_date})\n"
-                    f"• Var:   `{period_var:+.2f}%`"
+                    f"• Var:   `{end_nav - start_nav:+.2f} ({period_var:+.2f}%)`"
                 )
 
                 msg += "\n-------------------\n"
@@ -1142,7 +1146,7 @@ async def cmd_week(m: types.Message):
                     f"📊 *Range:*\n"
                     f"• Min:   `{min_val:.2f}` ({min_date})\n"
                     f"• Max:   `{max_val:.2f}` ({max_date})\n"
-                    f"• Var:   `{range_var:+.2f}%`"
+                    f"• Var:   `{max_val - min_val:+.2f} ({range_var:+.2f}%)`"
                 )
 
                 # Attach chart
