@@ -1727,7 +1727,13 @@ async def cmd_delta(m: types.Message):
                 if r['intrinsic'] is not None and r['time_value'] is not None:
                     iv_str = f"{r['intrinsic']:.2f}"
                     tv_str = f"{r['time_value']:+.2f}"
-                    line += f"\n    <code>  Premium {r['last_price']:.2f}  IV {iv_str}  TV {tv_str}</code>"
+                    
+                    # Highlight low Time Value (ITM and <= 1% of strike price)
+                    low_tv_warning = ""
+                    if r['intrinsic'] > 0 and r['time_value'] <= (0.01 * r['strike']):
+                        low_tv_warning = " ⚠️"
+                        
+                    line += f"\n    <code>  Prem. {r['last_price']:.2f} Intr.V {iv_str} TimeV {tv_str}</code>{low_tv_warning}"
 
                 lines.append(line.strip())
 
