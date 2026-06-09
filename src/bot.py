@@ -1589,6 +1589,7 @@ async def cmd_delta(m: types.Message):
             short_options = [
                 p for p in positions
                 if p.get('secType') == 'OPT' and p.get('qty', 0) < 0
+                and p.get('underlying', '').upper() not in settings.delta_alert_exclude_list
             ]
 
             if not short_options:
@@ -1667,7 +1668,7 @@ async def cmd_delta(m: types.Message):
                         intrinsic = max(0.0, underlying_price - strike)
                     time_value = last_price - intrinsic
 
-                display_und = underlying.split(':')[-1] if ':' in underlying else underlying
+                display_und = (underlying.split(':')[-1] if ':' in underlying else underlying)[:5]
                 return {
                     'underlying': display_und,
                     'right': right,
@@ -1697,7 +1698,7 @@ async def cmd_delta(m: types.Message):
 
             # Calculate max widths for alignment
             max_qty = max(len(f"{r['qty']:.0f}") for r in results)
-            max_und = max(len(r['underlying']) for r in results)
+            max_und = 5
             max_rs = max(len(r['right_strike']) for r in results)
 
             # Build digest message
