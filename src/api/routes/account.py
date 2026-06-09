@@ -132,7 +132,36 @@ async def get_positions():
             item.expiry = p.contract.lastTradeDateOrContractMonth
             item.strike = p.contract.strike
             item.right = p.contract.right
-            item.underlying = p.contract.symbol
+            
+            underlying = p.contract.symbol
+            if p.contract.currency != 'USD':
+                from src.parsing import EXCHANGE_PREFIXES
+                prefix = None
+                for pref, (exch, curr) in EXCHANGE_PREFIXES.items():
+                    if exch == p.contract.exchange and curr == p.contract.currency:
+                        prefix = pref
+                        break
+                
+                # Fallbacks for common exchanges if not exactly matching MONEP/MEFF/etc.
+                if not prefix:
+                    if p.contract.currency == 'EUR':
+                        if p.contract.exchange in ('MONEP', 'SBF'):
+                            prefix = 'EPA'
+                        elif p.contract.exchange in ('MEFF', 'BM'):
+                            prefix = 'MC'
+                        elif p.contract.exchange in ('DTB', 'EUREX'):
+                            prefix = 'ETR'
+                        else:
+                            prefix = 'EPA'  # general fallback for EUR options
+                    elif p.contract.currency == 'GBP':
+                        prefix = 'LON'
+                    elif p.contract.currency == 'CHF':
+                        prefix = 'SWX'
+                
+                if prefix:
+                    underlying = f"{prefix}:{underlying}"
+            
+            item.underlying = underlying
         items.append(item)
     return items
 
