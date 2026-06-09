@@ -1,3 +1,7 @@
+## v2026.06.09.2 (2026-06-09)
+
+- feat: add warning icon to premium display for low time value ITM options (81e0819)
+
 ## v2026.06.09.1 (2026-06-09)
 
 - refactor: simplify date formatting logic and update display formats for historical data (17cf2d2)
