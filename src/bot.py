@@ -1649,7 +1649,7 @@ async def cmd_delta(m: types.Message):
                                 try:
                                     last_dt = datetime.strptime(last_date_str, "%Y-%m-%d %H:%M:%S")
                                     age_min = int((datetime.now() - last_dt).total_seconds() / 60)
-                                    age_str = f"{age_min}m"
+                                    age_str = f"{age_min}m" if age_min >= 2 else ""
                                 except (ValueError, TypeError):
                                     pass
                     except Exception as e:
@@ -1753,19 +1753,24 @@ async def cmd_delta(m: types.Message):
 
                 # Append TV column if available
                 tv_part = ""
-                if has_any_tv:
+                if r['tv_str']:
                     tv_padded = r['tv_str'].ljust(max_tv)
                     if has_any_low_tv:
                         warning_indicator = "⚠️" if r['low_tv'] else "  "
                         tv_part = f" {tv_padded}{warning_indicator}"
                     else:
                         tv_part = f" {tv_padded}"
+                elif has_any_tv:
+                    # Only add empty spacing if this line has an age, to keep it aligned
+                    if age:
+                        padding_len = max_tv + (2 if has_any_low_tv else 0) + 1
+                        tv_part = " " * padding_len
 
                 line = f"{marker} <code>{qty_str} {und_padded} {rs_padded} {display_expiry} Δ{delta_str}{tv_part} {age}</code>"
                 option_lines.append(line.strip())
 
             options_text = "\n".join(option_lines)
-            message = f"{header}\n{options_text}\n\n🔴 abs(Δ) &gt; {settings.DELTA_ALERT_THRESHOLD}  🟢 abs(Δ) ≤ {settings.DELTA_ALERT_THRESHOLD}  ⚪ no data  ⚠️ low TV (≤ 1% strike)"
+            message = f"{header}\n{options_text}\n\n🔴 abs(Δ) &gt; {settings.DELTA_ALERT_THRESHOLD}  🟢 abs(Δ) ≤ {settings.DELTA_ALERT_THRESHOLD}  ⚪ no data\n⚠️ low TV (≤ 1% strike)"
 
             await m.answer(message, parse_mode="HTML")
 
