@@ -151,12 +151,34 @@ class Monitor:
                         continue
 
                     underlying = opt.get('underlying', '??')
+                    display_und = (underlying.split(':')[-1] if ':' in underlying else underlying)[:5]
                     right = opt.get('right', '?')
                     strike = opt.get('strike', 0)
                     expiry = opt.get('expiry', '')
 
                     strike_fmt = f"{strike:.0f}" if strike == int(strike) else f"{strike}"
                     exp_fmt = expiry.replace("-", "")
+
+                    # Capture price data for IV/TV calculation
+                    raw_last = data.get('last_price', 0.0)
+                    raw_und = data.get('underlying_price', 0.0)
+                    last_price = None
+                    underlying_price = None
+                    if raw_last and raw_last > 0:
+                        last_price = raw_last
+                    if raw_und and raw_und > 0:
+                        underlying_price = raw_und
+
+                    # Compute intrinsic value and time value
+                    intrinsic = None
+                    time_value = None
+                    if last_price is not None and underlying_price is not None and strike:
+                        right_upper = right.upper()
+                        if right_upper == 'P':
+                            intrinsic = max(0.0, strike - underlying_price)
+                        else:  # Call
+                            intrinsic = max(0.0, underlying_price - strike)
+                        time_value = last_price - intrinsic
 
                     # Calculate data age in minutes
                     age_str = ""
@@ -165,18 +187,22 @@ class Monitor:
                         try:
                             last_dt = datetime.datetime.strptime(last_date_str, "%Y-%m-%d %H:%M:%S")
                             age_min = int((datetime.datetime.now() - last_dt).total_seconds() / 60)
-                            age_str = f"{age_min}m"
+                            age_str = f"{age_min}m" if age_min >= 2 else ""
                         except (ValueError, TypeError):
                             pass
 
                     delta_alerts.append({
                         'con_id': con_id,
-                        'underlying': underlying,
+                        'underlying': display_und,
+                        'right': right,
+                        'strike': strike,
                         'right_strike': f"{right}{strike_fmt}",
                         'expiry': exp_fmt,
                         'delta': delta,
                         'qty': abs(qty),
-                        'age': age_str
+                        'age': age_str,
+                        'intrinsic': intrinsic,
+                        'time_value': time_value,
                     })
 
             # Send a single digest if there are any high-delta alerts
@@ -188,24 +214,66 @@ class Monitor:
 
                 # Calculate max widths for alignment
                 max_qty = max(len(f"{a['qty']:.0f}") for a in delta_alerts)
-                max_und = max(len(a['underlying']) for a in delta_alerts)
+                max_und = 5
                 max_rs = max(len(a['right_strike']) for a in delta_alerts)
 
-                lines = [f"⚠️ <b>High Delta Warning — {len(delta_alerts)} Short Position(s)</b>\n"]
+                header = f"⚠️ <b>High Delta Warning — {len(delta_alerts)} Short Position(s)</b>\n"
+
+                # Calculate TV strings first to determine max_tv
+                for a in delta_alerts:
+                    a['tv_str'] = ""
+                    a['low_tv'] = False
+                    if a['intrinsic'] is not None and a['time_value'] is not None:
+                        tv_val = f"{a['time_value']:+.2f}".replace("+0.", "+.").replace("-0.", "-.")
+                        a['tv_str'] = f"TV{tv_val}"
+                        if a['intrinsic'] > 0 and a['time_value'] <= (0.01 * a['strike']):
+                            a['low_tv'] = True
+
+                has_any_tv = any(a['tv_str'] != "" for a in delta_alerts)
+                max_tv = max(len(a['tv_str']) for a in delta_alerts if a['tv_str'] != "") if has_any_tv else 0
+                has_any_low_tv = any(a['low_tv'] for a in delta_alerts)
+
+                option_lines = []
                 for a in delta_alerts:
                     marker = "🔴"
+                    delta_str = f"{abs(a['delta']):.2f}"
                     qty_str = f"{a['qty']:.0f}".rjust(max_qty)
                     und_padded = a['underlying'].ljust(max_und)
                     rs_padded = a['right_strike'].ljust(max_rs)
-                    delta_str = f"{a['delta']:+.3f}"
                     age = a['age']
 
-                    lines.append(
-                        f"{marker} <code>{qty_str} {und_padded} {rs_padded} {a['expiry']} Δ{delta_str} {age}</code>".strip()
-                    )
-                lines.append(f"\n🔴 abs(Δ) &gt; {settings.DELTA_ALERT_THRESHOLD}")
+                    # Format expiry to DDMMMyy for consistent alignment (e.g. 19Jun26)
+                    display_expiry = a['expiry']
+                    if len(display_expiry) == 8 and display_expiry.isdigit():
+                        try:
+                            dt = datetime.datetime.strptime(display_expiry, "%Y%m%d")
+                            months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+                            month_str = months[dt.month - 1]
+                            display_expiry = f"{dt.day:02d}{month_str}{dt.year % 100:02d}"
+                        except Exception:
+                            pass
 
-                await notify_admins("\n".join(lines), parse_mode="HTML")
+                    # Append TV column if available
+                    tv_part = ""
+                    if a['tv_str']:
+                        tv_padded = a['tv_str'].ljust(max_tv)
+                        if has_any_low_tv:
+                            warning_indicator = "⚠️" if a['low_tv'] else "  "
+                            tv_part = f" {tv_padded}{warning_indicator}"
+                        else:
+                            tv_part = f" {tv_padded}"
+                    elif has_any_tv:
+                        if age:
+                            padding_len = max_tv + (2 if has_any_low_tv else 0) + 1
+                            tv_part = " " * padding_len
+
+                    line = f"{marker} <code>{qty_str} {und_padded} {rs_padded} {display_expiry} Δ{delta_str}{tv_part} {age}</code>"
+                    option_lines.append(line.strip())
+
+                options_text = "\n".join(option_lines)
+                message = f"{header}\n{options_text}\n\n🔴 abs(Δ) &gt; {settings.DELTA_ALERT_THRESHOLD}\n⚠️ low time value (≤ 1% strike)"
+
+                await notify_admins(message, parse_mode="HTML")
 
                 # Update throttle cache for all alerted contracts
                 for a in delta_alerts:
