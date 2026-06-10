@@ -1,3 +1,16 @@
+## v2026.06.10 (2026-06-10)
+
+- feat: calculate and display option time value and intrinsic value in high delta alerts (2e84909)
+- fix: handle full symbol strings in delta alert exclusion list by stripping exchange prefixes (81b1acb)
+- feat: exclude filtered underlyings and truncate display labels in option alerts (2f2c1ac)
+- refactor: normalize delta display and standardize expiry date formatting to DDMMMyy (1ed2e7a)
+- refactor: simplify delta formatting to use absolute values and strip leading zeros (6ad162d)
+- refactor: clean up age display, adjust TV column alignment, and reformat alert legend (026ce08)
+- refactor: format time value and low TV warning as a consistent column in option alerts (41bf512)
+- refactor: improve option display formatting by cleaning underlying names, simplifying delta notation, and shortening expiry dates (fa3e78e)
+- feat: prefix underlying symbols with exchange codes for non-USD contracts (0a37527)
+- refactor: format option price details using blockquotes for improved readability in delta report (214d090)
+
 ## v2026.06.09.2 (2026-06-09)
 
 - feat: add warning icon to premium display for low time value ITM options (81e0819)
