@@ -336,24 +336,25 @@ def block_details(title, blocks: list[dict], is_open: bool = False) -> dict:
 
 from typing import Union, Optional, Any
 from aiogram.methods.base import TelegramMethod
+from pydantic import Field
 
 class SendRichMessage(TelegramMethod[types.Message]):
     __returning__ = types.Message
     __api_method__ = "sendRichMessage"
 
-    chat_id: Union[int, str]
-    rich_message: dict
-    reply_markup: Optional[Any] = None
+    chat_id: Union[int, str] = Field(..., alias="chat_id")
+    rich_message: dict = Field(..., alias="rich_message")
+    reply_markup: Optional[Any] = Field(None, alias="reply_markup")
 
 class EditMessageTextRich(TelegramMethod[Union[types.Message, bool]]):
     __returning__ = Union[types.Message, bool]
     __api_method__ = "editMessageText"
 
-    chat_id: Optional[Union[int, str]] = None
-    message_id: Optional[int] = None
-    inline_message_id: Optional[str] = None
-    rich_message: dict
-    reply_markup: Optional[Any] = None
+    chat_id: Optional[Union[int, str]] = Field(None, alias="chat_id")
+    message_id: Optional[int] = Field(None, alias="message_id")
+    inline_message_id: Optional[str] = Field(None, alias="inline_message_id")
+    rich_message: dict = Field(..., alias="rich_message")
+    reply_markup: Optional[Any] = Field(None, alias="reply_markup")
 
 async def send_rich_message(chat_id: int, blocks: list[dict], reply_markup=None) -> types.Message:
     return await bot(
