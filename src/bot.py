@@ -334,37 +334,44 @@ def block_details(title, blocks: list[dict], is_open: bool = False) -> dict:
         res["is_open"] = True
     return res
 
+from typing import Union, Optional, Any
+from aiogram.methods.base import TelegramMethod
+
+class SendRichMessage(TelegramMethod[types.Message]):
+    __returning__ = types.Message
+    __api_method__ = "sendRichMessage"
+
+    chat_id: Union[int, str]
+    rich_message: dict
+    reply_markup: Optional[Any] = None
+
+class EditMessageTextRich(TelegramMethod[Union[types.Message, bool]]):
+    __returning__ = Union[types.Message, bool]
+    __api_method__ = "editMessageText"
+
+    chat_id: Optional[Union[int, str]] = None
+    message_id: Optional[int] = None
+    inline_message_id: Optional[str] = None
+    rich_message: dict
+    reply_markup: Optional[Any] = None
+
 async def send_rich_message(chat_id: int, blocks: list[dict], reply_markup=None) -> types.Message:
-    params = {
-        "chat_id": chat_id,
-        "rich_message": {
-            "blocks": blocks
-        }
-    }
-    if reply_markup:
-        params["reply_markup"] = reply_markup
-    
-    return await bot.session.make_request(
-        bot,
-        method="sendRichMessage",
-        params=params
+    return await bot(
+        SendRichMessage(
+            chat_id=chat_id,
+            rich_message={"blocks": blocks},
+            reply_markup=reply_markup
+        )
     )
 
 async def edit_message_to_rich(chat_id: int, message_id: int, blocks: list[dict], reply_markup=None) -> types.Message:
-    params = {
-        "chat_id": chat_id,
-        "message_id": message_id,
-        "rich_message": {
-            "blocks": blocks
-        }
-    }
-    if reply_markup:
-        params["reply_markup"] = reply_markup
-        
-    return await bot.session.make_request(
-        bot,
-        method="editMessageText",
-        params=params
+    return await bot(
+        EditMessageTextRich(
+            chat_id=chat_id,
+            message_id=message_id,
+            rich_message={"blocks": blocks},
+            reply_markup=reply_markup
+        )
     )
 
 async def notify_admins_rich(blocks: list[dict], reply_markup=None):
@@ -556,7 +563,7 @@ async def cmd_nav(m: types.Message):
             await m.answer(f"❌ API Error: {err_detail}")
         except Exception as e:
             logger.error(f"Error in /nav: {e}", exc_info=True)
-            await m.answer("❌ Error interno. Revisa los logs.")
+            await m.answer("❌ Internal error. Check logs.")
 
 @dp.message(Command("pos", ignore_case=True))
 async def cmd_pos(m: types.Message):
@@ -622,7 +629,7 @@ async def cmd_pos(m: types.Message):
             await m.answer(f"❌ API Error: {err_detail}")
         except Exception as e:
             logger.error(f"Error in /pos: {e}", exc_info=True)
-            await m.answer("❌ Error interno. Revisa los logs.")
+            await m.answer("❌ Internal error. Check logs.")
 
 
 @dp.message(Command("options", ignore_case=True))
@@ -693,7 +700,7 @@ async def cmd_options(m: types.Message):
             await m.answer(f"❌ API Error: {err_detail}")
         except Exception as e:
             logger.error(f"Error in /options: {e}", exc_info=True)
-            await m.answer("❌ Error interno. Revisa los logs.")
+            await m.answer("❌ Internal error. Check logs.")
 
 
 @dp.callback_query(F.data == "noop")
@@ -773,7 +780,7 @@ async def process_opt_details(callback: types.CallbackQuery):
             await callback.answer()
         except Exception as e:
             logger.error(f"Error in /options callback: {e}", exc_info=True)
-            await callback.message.answer("❌ Error interno. Revisa los logs.")
+            await callback.message.answer("❌ Internal error. Check logs.")
             await callback.answer()
 
 
@@ -850,7 +857,7 @@ async def cmd_max(m: types.Message):
             await m.answer(f"❌ API Error: {err_detail}")
         except Exception as e:
             logger.error(f"Error in /max: {e}", exc_info=True)
-            await m.answer("❌ Error interno. Revisa los logs.")
+            await m.answer("❌ Internal error. Check logs.")
 
 
 @dp.message(Command("today", "day", ignore_case=True))
@@ -967,7 +974,7 @@ async def cmd_today(m: types.Message):
 
         except Exception as e:
             logger.error(f"Error in cmd_today: {e}", exc_info=True)
-            await m.answer("❌ Error interno. Revisa los logs.")
+            await m.answer("❌ Internal error. Check logs.")
 
 
 
@@ -1110,7 +1117,7 @@ async def cmd_year(m: types.Message):
 
         except Exception as e:
             logger.error(f"Error in cmd_year: {e}", exc_info=True)
-            await m.answer("❌ Error interno. Revisa los logs.")
+            await m.answer("❌ Internal error. Check logs.")
 
 
 @dp.message(Command("month", ignore_case=True))
@@ -1241,7 +1248,7 @@ async def cmd_month(m: types.Message):
 
         except Exception as e:
             logger.error(f"Error in cmd_month: {e}", exc_info=True)
-            await m.answer("❌ Error interno. Revisa los logs.")
+            await m.answer("❌ Internal error. Check logs.")
 
 
 @dp.message(Command("week", ignore_case=True))
@@ -1357,7 +1364,7 @@ async def cmd_week(m: types.Message):
 
         except Exception as e:
             logger.error(f"Error in cmd_week: {e}", exc_info=True)
-            await m.answer("❌ Error interno. Revisa los logs.")
+            await m.answer("❌ Internal error. Check logs.")
 
 
 @dp.message(Command("help", ignore_case=True))
@@ -1437,7 +1444,7 @@ async def cmd_orders(m: types.Message):
             await m.answer(f"❌ API Error: {err_detail}")
         except Exception as e:
             logger.error(f"Error in /orders: {e}", exc_info=True)
-            await m.answer("❌ Error interno. Revisa los logs.")
+            await m.answer("❌ Internal error. Check logs.")
 
 
 @dp.message(Command("trades", ignore_case=True))
@@ -1494,7 +1501,7 @@ async def cmd_trades(m: types.Message):
             await m.answer(f"❌ API Error: {err_detail}")
         except Exception as e:
             logger.error(f"Error in /trades: {e}", exc_info=True)
-            await m.answer("❌ Error interno. Revisa los logs.")
+            await m.answer("❌ Internal error. Check logs.")
 
 
 @dp.message(Command("quote", ignore_case=True))
@@ -1576,7 +1583,7 @@ async def cmd_quote(m: types.Message):
                 await m.answer(err_msg)
         except Exception as e:
             logger.error(f"Error in /quote: {e}", exc_info=True)
-            err_msg = "❌ Error interno. Revisa los logs."
+            err_msg = "❌ Internal error. Check logs."
             if msg_id:
                 await edit_message_to_rich(m.chat.id, msg_id, [block_paragraph(err_msg)])
             else:
@@ -1658,7 +1665,7 @@ async def cmd_contract(m: types.Message):
                 await m.answer(err_msg)
         except Exception as e:
             logger.error(f"Error in /contract: {e}", exc_info=True)
-            err_msg = "❌ Error interno. Revisa los logs."
+            err_msg = "❌ Internal error. Check logs."
             if msg_id:
                 await edit_message_to_rich(m.chat.id, msg_id, [block_paragraph(err_msg)])
             else:
@@ -1781,7 +1788,7 @@ async def cmd_chain(m: types.Message):
                 await m.answer(err_msg)
         except Exception as e:
             logger.error(f"Error in /chain: {e}", exc_info=True)
-            err_msg = "❌ Error interno. Revisa los logs."
+            err_msg = "❌ Internal error. Check logs."
             if msg_id:
                 await edit_message_to_rich(m.chat.id, msg_id, [block_paragraph(err_msg)])
             else:
@@ -2214,7 +2221,7 @@ async def cmd_delta(m: types.Message):
 
     except Exception as e:
         logger.error(f"Error in /delta: {e}", exc_info=True)
-        err_msg = "❌ Error interno. Revisa los logs."
+        err_msg = "❌ Internal error. Check logs."
         if msg_id:
             try:
                 await edit_message_to_rich(m.chat.id, msg_id, [block_paragraph(err_msg)])
