@@ -1570,21 +1570,7 @@ async def cmd_quote(m: types.Message):
 
     symbol = args[1].upper()
 
-    status_msg = None
-    msg_id = None
-    try:
-        status_msg = await send_rich_message(
-            m.chat.id,
-            [
-                block_heading("Market Quote"),
-                block_paragraph(f"Fetching snapshot for {symbol}..."),
-                block_thinking()
-            ]
-        )
-        if status_msg:
-            msg_id = status_msg.get("message_id") if isinstance(status_msg, dict) else getattr(status_msg, "message_id", None)
-    except Exception as e:
-        logger.warning(f"Could not send thinking status message: {e}")
+    msg = await m.answer(f"🔍 Getting quote for {symbol}...")
 
     async with httpx.AsyncClient(timeout=30.0) as client:
         try:
@@ -1592,14 +1578,10 @@ async def cmd_quote(m: types.Message):
             r.raise_for_status()
             data = r.json()
 
-            rows = [
-                [cell("Metric", is_header=True), cell("Value", is_header=True, align="right")]
-            ]
-            rows.append([cell("Price"), cell(f"{data['price']:.2f}", align="right")])
-            if data.get('bid') is not None:
-                rows.append([cell("Bid"), cell(f"{data['bid']:.2f}", align="right")])
-            if data.get('ask') is not None:
-                rows.append([cell("Ask"), cell(f"{data['ask']:.2f}", align="right")])
+            out = f"📈 *Quote: {data['symbol']}*\n\n"
+            out += f"💰 Price: `{data['price']:.2f}`\n"
+            if data.get('bid') is not None and data.get('ask') is not None:
+                out += f"↔️ Bid/Ask: `{data['bid']:.2f} / {data['ask']:.2f}`\n"
 
             # Format timestamp
             ts_str = data['timestamp']
@@ -1616,35 +1598,20 @@ async def cmd_quote(m: types.Message):
             else:
                 ts_formatted = ts_str
 
-            blocks = [
-                block_heading(f"📈 Quote: {data['symbol']}"),
-                block_table(rows, is_bordered=True),
-                block_paragraph(f"⏱ {ts_formatted}")
-            ]
+            out += f"⏱ `{ts_formatted}`"
 
-            if msg_id:
-                await edit_message_to_rich(m.chat.id, msg_id, blocks)
-            else:
-                await send_rich_message(m.chat.id, blocks)
+            await msg.edit_text(out, parse_mode="Markdown")
 
         except httpx.HTTPStatusError as e:
             err_detail = e.response.text or str(e)
             logger.error(f"HTTP Error in /quote: {err_detail}")
-            err_msg = f"❌ API Error: {err_detail}"
-            if msg_id:
-                await edit_message_to_rich(m.chat.id, msg_id, [block_paragraph(err_msg)])
-            else:
-                await m.answer(err_msg)
+            await msg.edit_text(f"❌ API Error: {err_detail}")
         except Exception as e:
             logger.error(f"Error in /quote: {e}", exc_info=True)
-            err_msg = "❌ Internal error. Check logs."
-            if msg_id:
-                await edit_message_to_rich(m.chat.id, msg_id, [block_paragraph(err_msg)])
-            else:
-                await m.answer(err_msg)
+            await msg.edit_text("❌ Internal error. Check logs.")
 
 
-@dp.message(Command("contract", ignore_case=True))
+@dp.message(Command("contract", "contracts", ignore_case=True))
 async def cmd_contract(m: types.Message):
     if m.from_user.id not in settings.allowed_ids_list:
         return
@@ -2226,9 +2193,7 @@ async def render_delta_report(chat_id: int, msg_id: Optional[int] = None, sort_b
             rows = [
                 [
                     cell("Qty", is_header=True, align="right"),
-                    cell("Und.", is_header=True),
-                    cell("Opt.", is_header=True),
-                    cell("Expiry", is_header=True),
+                    cell("Option", is_header=True),
                     cell("Delta", is_header=True, align="right"),
                     cell("TV", is_header=True, align="right"),
                     cell("Age", is_header=True, align="right")
@@ -2264,11 +2229,11 @@ async def render_delta_report(chat_id: int, msg_id: Optional[int] = None, sort_b
                 else:
                     tv_cell_val = text_plain(tv_val)
 
+                option_text = f"{r['underlying']} {r['right_strike']} {display_expiry}"
+
                 rows.append([
                     cell(f"{r['qty']:.0f}", align="right"),
-                    cell(r['underlying']),
-                    cell(r['right_strike']),
-                    cell(display_expiry),
+                    cell(option_text),
                     cell(delta_cell_val, align="right"),
                     cell(tv_cell_val, align="right"),
                     cell(r['age'], align="right")
