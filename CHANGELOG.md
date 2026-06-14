@@ -1,3 +1,7 @@
+## v2026.06.14.3 (2026-06-14)
+
+- fix: serialize custom blocks structure to Rich HTML strings inside send_rich_message and edit_message_to_rich to comply with Telegram InputRichMessage API schema (714731e)
+
 ## v2026.06.14.2 (2026-06-14)
 
 - fix: add explicit Pydantic Field aliases to custom TelegramMethod classes to ensure correct serialization to snake_case (e87277e)
