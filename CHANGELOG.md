@@ -1,3 +1,7 @@
+## v2026.06.14.1 (2026-06-14)
+
+- fix: resolve Telegram Bot API 10.1 rich message make_request TypeError and translate internal error responses to English (d228e3b)
+
 ## v2026.06.14 (2026-06-14)
 
 - feat: add comprehensive unit test suite and refactor core logic for better testability (9abc06e)
