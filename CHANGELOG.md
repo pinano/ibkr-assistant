@@ -1,3 +1,7 @@
+## v2026.06.14 (2026-06-14)
+
+- feat: add comprehensive unit test suite and refactor core logic for better testability (9abc06e)
+
 ## v2026.06.10 (2026-06-10)
 
 - feat: calculate and display option time value and intrinsic value in high delta alerts (2e84909)
