@@ -224,7 +224,7 @@ class Monitor:
                     a['tv_str'] = ""
                     a['low_tv'] = False
                     if a['intrinsic'] is not None and a['time_value'] is not None:
-                        tv_val = f"{a['time_value']:+.2f}".replace("+0.", "+.").replace("-0.", "-.")
+                        tv_val = f"{a['time_value']:.2f}"
                         a['tv_str'] = tv_val
                         if a['intrinsic'] > 0 and a['time_value'] <= (0.01 * a['strike']):
                             a['low_tv'] = True

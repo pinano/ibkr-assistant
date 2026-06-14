@@ -517,7 +517,7 @@ async def check_and_archive(force_insert: bool = False):
                     )
 
                     # Check for alerts using the previous record
-                    alerts_data = []
+                    alerts = []
                     cash_changed = False
                     if last_record:
                         for curr in ['eur', 'usd', 'gbp', 'chf', 'sek']:
@@ -527,15 +527,16 @@ async def check_and_archive(force_insert: bool = False):
                             if new_val != old_val:
                                 cash_changed = True
                                 diff = new_val - old_val
+                                sign = "+" if diff > 0 else "-"
+                                abs_diff = abs(diff)
                                 curr_upper = curr.upper()
                                 emoji = EMOJI_MAP.get(curr_upper, "💰")
-                                alerts_data.append({
-                                    "currency": curr_upper,
-                                    "emoji": emoji,
-                                    "diff": diff,
-                                    "old": old_val,
-                                    "new": new_val
-                                })
+
+                                alert = (
+                                    f"<code>{curr_upper} {emoji} {diff:+.4f}</code>\n"
+                                    f"<code>{old_val:.4f} {sign} {abs_diff:.4f} = {new_val:.4f}</code>"
+                                )
+                                alerts.append(alert)
 
                     # Only insert to DB if:
                     # 1. Cash balance has changed, OR
@@ -553,30 +554,11 @@ async def check_and_archive(force_insert: bool = False):
                     else:
                         logger.debug("No DB insert - no cash changes detected")
 
-                    if alerts_data:
-                        rows = [
-                            [
-                                cell("Currency", is_header=True),
-                                cell("Icon", is_header=True),
-                                cell("Change", is_header=True, align="right"),
-                                cell("Old Balance", is_header=True, align="right"),
-                                cell("New Balance", is_header=True, align="right")
-                            ]
-                        ]
-                        for a in alerts_data:
-                            rows.append([
-                                cell(a["currency"]),
-                                cell(a["emoji"]),
-                                cell(f"{a['diff']:+.4f}", align="right"),
-                                cell(f"{a['old']:.4f}", align="right"),
-                                cell(f"{a['new']:.4f}", align="right")
-                            ])
-                        
-                        blocks = [
-                            block_heading("💰 Cash Balance Change Alert"),
-                            block_table(rows, is_bordered=True, is_striped=True)
-                        ]
-                        await notify_admins_rich(blocks)
+                    if alerts:
+                        await notify_admins(
+                            "💰 <b>Cash balance change:</b>\n" + "\n".join(alerts),
+                            parse_mode="HTML"
+                        )
 
             except Exception as e:
                 logger.error(f"DB/Logic Error: {e}")
@@ -2236,8 +2218,7 @@ async def render_delta_report(chat_id: int, msg_id: Optional[int] = None, sort_b
                 r['tv_str'] = ""
                 r['low_tv'] = False
                 if r['intrinsic'] is not None and r['time_value'] is not None:
-                    tv_val = f"{r['time_value']:+.2f}".replace("+0.", "+.").replace("-0.", "-.")
-                    # No longer prefix with "TV"
+                    tv_val = f"{r['time_value']:.2f}"
                     r['tv_str'] = tv_val
                     if r['intrinsic'] > 0 and r['time_value'] <= (0.01 * r['strike']):
                         r['low_tv'] = True
@@ -2278,7 +2259,10 @@ async def render_delta_report(chat_id: int, msg_id: Optional[int] = None, sort_b
 
                 tv_val = r['tv_str']
                 if r['low_tv']:
-                    tv_val += " ⚠️"
+                    tv_text = f"{tv_val} ⚠️"
+                    tv_cell_val = text_bold(tv_text)
+                else:
+                    tv_cell_val = text_plain(tv_val)
 
                 rows.append([
                     cell(f"{r['qty']:.0f}", align="right"),
@@ -2286,7 +2270,7 @@ async def render_delta_report(chat_id: int, msg_id: Optional[int] = None, sort_b
                     cell(r['right_strike']),
                     cell(display_expiry),
                     cell(delta_cell_val, align="right"),
-                    cell(tv_val, align="right"),
+                    cell(tv_cell_val, align="right"),
                     cell(r['age'], align="right")
                 ])
 
