@@ -1,3 +1,7 @@
+## v2026.06.14.2 (2026-06-14)
+
+- fix: add explicit Pydantic Field aliases to custom TelegramMethod classes to ensure correct serialization to snake_case (e87277e)
+
 ## v2026.06.14.1 (2026-06-14)
 
 - fix: resolve Telegram Bot API 10.1 rich message make_request TypeError and translate internal error responses to English (d228e3b)
