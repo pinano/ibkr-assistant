@@ -154,9 +154,83 @@ The `Makefile` is the primary interface for all lifecycle operations. Key target
 
 ## Testing
 
-- Tests live in `tests/`. Run with `pytest`.
-- `src/parsing.py` must remain importable without triggering FastAPI/SQLAlchemy/IB initialization — keep it dependency-free.
-- Before any refactor that touches parsing logic, run `pytest tests/` to verify correctness.
+### Test suite overview
+
+The test suite lives in `tests/` and is designed to run **without a live IBKR connection, database, or Telegram bot**. All tests exercise pure business logic extracted from the production modules.
+
+| File | Tests | What is covered |
+|---|---|---|
+| `test_parsing.py` | 40 | `parse_symbol`, `parse_osi_symbol`, `parse_european_symbol`, `greeks_are_valid`, `snap_is_valid` |
+| `test_helpers.py` | 25 | `_is_market_open()` weekday/hour logic; CBOE option ID string construction; `val_or_zero()` coercion |
+| `test_account.py` | 22 | Exchange→prefix resolution for EUR/GBP/CHF options; `get_val()` tag/currency/BASE fallback logic |
+| `test_monitor.py` | 39 | Intrinsic/time-value math for puts and calls; expiry date formatting; delta alert filtering, throttling, and cache pruning |
+| `test_rich_helpers.py` | 50 | All Telegram Bot API 10.1 rich message block builders (`text_*`, `html_to_rich`, `cell`, `block_table`, `block_details`, `block_thinking`) |
+| `test_models.py` | 28 | Pydantic model validation for all API response types; trade `execId` deduplication; `localSymbol or symbol` fallback |
+
+**Total: 204 tests.**
+
+### How to run (host / local development)
+
+The venv at `.venv/` is a thin overlay on top of the system Python installation. The main dependencies (pydantic, sqlalchemy, aiogram, etc.) are installed as **system packages** inside Docker — they are not present in the venv. The venv only adds matplotlib/numpy for chart generation, plus `pytest`.
+
+The venv must have `include-system-site-packages = true` in `.venv/pyvenv.cfg` for the tests to find `pydantic`. This is already the case after initial setup. If you ever recreate the venv and tests fail with `ModuleNotFoundError: No module named 'pydantic'`, run:
+
+```bash
+sed -i 's/include-system-site-packages = false/include-system-site-packages = true/' .venv/pyvenv.cfg
+```
+
+Then run the tests:
+
+```bash
+# Run the full suite (204 tests, ~0.2 s)
+.venv/bin/pytest tests/
+
+# Run with verbose output
+.venv/bin/pytest tests/ -v
+
+# Run a single file
+.venv/bin/pytest tests/test_parsing.py -v
+
+# Run a specific test class or case
+.venv/bin/pytest tests/test_monitor.py::TestIntrinsicAndTimeValue -v
+```
+
+No Docker stack is required. Tests do not make network requests.
+
+### What is NOT tested here (requires Docker)
+
+The following components involve live IBKR/DB/Telegram interactions and are outside the scope of the offline suite:
+
+- FastAPI route handlers (`src/api/routes/*.py`) — require a running `ibkr-api` container.
+- Database read/write operations — require a running `ibkr-db` container.
+- Bot command handlers that send Telegram messages — require a running `ibkr-bot` container.
+- The `FlexReporter` and IBKR Flex XML parsing — require valid credentials.
+
+### Agent rules for testing
+
+**Before any code change:**
+1. Run `pytest tests/` and confirm all 204 tests pass. If any are failing before your change, document why before proceeding.
+
+**After any code change** touching these areas, **always re-run the suite** and confirm it is still green:
+
+- `src/parsing.py` (any change)
+- `src/api/helpers.py` (`_is_market_open`, `val_or_zero`, CBOE ID logic)
+- `src/api/routes/account.py` (prefix resolution, `get_val`)
+- `src/monitor.py` (alert filtering, intrinsic/TV math, date formatting)
+- `src/bot.py` (rich message helpers: `text_*`, `block_*`, `cell`, `html_to_rich`)
+- `src/models.py` (Pydantic model fields)
+- `src/api/routes/orders.py` (trade deduplication, symbol fallback)
+
+**When adding new business logic** (a new helper, a new filtering rule, a new formatter), add corresponding tests in the relevant `tests/test_*.py` file. Tests must:
+- Be importable without Docker (no `src.api.*`, no `src.models`, no live connections).
+- Replicate any logic that depends on unavailable packages as an **inline pure function** in the test file — not imported from the production module.
+- Cover at least: the happy path, a boundary/edge condition, and one invalid/empty input.
+
+**Syntax verification** after editing `src/bot.py` or any API file:
+
+```bash
+.venv/bin/python -m py_compile src/bot.py src/api/routes/orders.py src/api/routes/options.py
+```
 
 ---
 

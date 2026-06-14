@@ -216,6 +216,164 @@ async def notify_admins(text: str, parse_mode: str = "Markdown"):
         except Exception as e:
             logger.error(f"Failed to notify admin {chat_id}: {e}")
 
+# ---------------------------------------------------------------------------
+# Telegram Bot API 10.1 Rich Messages Helpers
+# ---------------------------------------------------------------------------
+
+def text_plain(t: str) -> dict:
+    return {"type": "plain", "text": t}
+
+def text_bold(t) -> dict:
+    if isinstance(t, str):
+        t = text_plain(t)
+    return {"type": "bold", "text": t}
+
+def text_italic(t) -> dict:
+    if isinstance(t, str):
+        t = text_plain(t)
+    return {"type": "italic", "text": t}
+
+def text_code(t) -> dict:
+    if isinstance(t, str):
+        t = text_plain(t)
+    return {"type": "code", "text": t}
+
+def text_url(t, url: str) -> dict:
+    if isinstance(t, str):
+        t = text_plain(t)
+    return {"type": "url", "text": t, "url": url}
+
+def text_concat(*args) -> dict:
+    processed = []
+    for arg in args:
+        if isinstance(arg, str):
+            processed.append(text_plain(arg))
+        elif isinstance(arg, dict):
+            processed.append(arg)
+        elif isinstance(arg, list):
+            processed.extend([text_plain(x) if isinstance(x, str) else x for x in arg])
+    if not processed:
+        return text_plain("")
+    if len(processed) == 1:
+        return processed[0]
+    return {"type": "texts", "texts": processed}
+
+def html_to_rich(html_text: str) -> dict:
+    import re
+    pattern = re.compile(r'(<b>.*?</b>|<i>.*?</i>|<code>.*?</code>|[^<]+|<)')
+    tokens = pattern.findall(html_text)
+    spans = []
+    for tok in tokens:
+        if not tok:
+            continue
+        if tok.startswith("<b>") and tok.endswith("</b>"):
+            spans.append(text_bold(tok[3:-4]))
+        elif tok.startswith("<i>") and tok.endswith("</i>"):
+            spans.append(text_italic(tok[3:-4]))
+        elif tok.startswith("<code>") and tok.endswith("</code>"):
+            spans.append(text_code(tok[6:-7]))
+        else:
+            spans.append(text_plain(tok))
+    return text_concat(*spans)
+
+def block_paragraph(text_obj) -> dict:
+    if isinstance(text_obj, str):
+        text_obj = text_plain(text_obj)
+    return {"type": "paragraph", "text": text_obj}
+
+def block_heading(text_obj) -> dict:
+    if isinstance(text_obj, str):
+        text_obj = text_plain(text_obj)
+    return {"type": "sectionHeading", "text": text_obj}
+
+def block_thinking() -> dict:
+    return {"type": "thinking"}
+
+def cell(text_obj=None, is_header: bool = False, align: str = None, valign: str = None, colspan: int = None, rowspan: int = None) -> dict:
+    res = {}
+    if text_obj is not None:
+        if isinstance(text_obj, str):
+            text_obj = text_plain(text_obj)
+        res["text"] = text_obj
+    if is_header:
+        res["is_header"] = True
+    if align:
+        res["align"] = align
+    if valign:
+        res["valign"] = valign
+    if colspan and colspan > 1:
+        res["colspan"] = colspan
+    if rowspan and rowspan > 1:
+        res["rowspan"] = rowspan
+    return res
+
+def block_table(cells: list[list[dict]], is_bordered: bool = False, is_striped: bool = False, caption=None) -> dict:
+    res = {
+        "type": "table",
+        "cells": cells
+    }
+    if is_bordered:
+        res["is_bordered"] = True
+    if is_striped:
+        res["is_striped"] = True
+    if caption:
+        if isinstance(caption, str):
+            caption = text_plain(caption)
+        res["caption"] = caption
+    return res
+
+def block_details(title, blocks: list[dict], is_open: bool = False) -> dict:
+    if isinstance(title, str):
+        title = text_plain(title)
+    res = {
+        "type": "details",
+        "title": title,
+        "blocks": blocks
+    }
+    if is_open:
+        res["is_open"] = True
+    return res
+
+async def send_rich_message(chat_id: int, blocks: list[dict], reply_markup=None) -> types.Message:
+    params = {
+        "chat_id": chat_id,
+        "rich_message": {
+            "blocks": blocks
+        }
+    }
+    if reply_markup:
+        params["reply_markup"] = reply_markup
+    
+    return await bot.session.make_request(
+        bot,
+        method="sendRichMessage",
+        params=params
+    )
+
+async def edit_message_to_rich(chat_id: int, message_id: int, blocks: list[dict], reply_markup=None) -> types.Message:
+    params = {
+        "chat_id": chat_id,
+        "message_id": message_id,
+        "rich_message": {
+            "blocks": blocks
+        }
+    }
+    if reply_markup:
+        params["reply_markup"] = reply_markup
+        
+    return await bot.session.make_request(
+        bot,
+        method="editMessageText",
+        params=params
+    )
+
+async def notify_admins_rich(blocks: list[dict], reply_markup=None):
+    for chat_id in settings.allowed_ids_list:
+        try:
+            await send_rich_message(chat_id, blocks, reply_markup=reply_markup)
+        except Exception as e:
+            logger.error(f"Failed to notify admin {chat_id} with rich message: {e}")
+
 API_HEADERS = {"X-API-Key": settings.API_KEY}
 
 # Constants
@@ -280,7 +438,7 @@ async def check_and_archive(force_insert: bool = False):
                     )
 
                     # Check for alerts using the previous record
-                    alerts = []
+                    alerts_data = []
                     cash_changed = False
                     if last_record:
                         for curr in ['eur', 'usd', 'gbp', 'chf', 'sek']:
@@ -290,18 +448,15 @@ async def check_and_archive(force_insert: bool = False):
                             if new_val != old_val:
                                 cash_changed = True
                                 diff = new_val - old_val
-                                sign = "+" if diff > 0 else "-"
-                                abs_diff = abs(diff)
-
-                                # Emoji mapping
                                 curr_upper = curr.upper()
                                 emoji = EMOJI_MAP.get(curr_upper, "💰")
-
-                                alert = (
-                                    f"<code>{curr_upper} {emoji} {diff:+.4f}</code>\n"
-                                    f"<code>{old_val:.4f} {sign} {abs_diff:.4f} = {new_val:.4f}</code>"
-                                )
-                                alerts.append(alert)
+                                alerts_data.append({
+                                    "currency": curr_upper,
+                                    "emoji": emoji,
+                                    "diff": diff,
+                                    "old": old_val,
+                                    "new": new_val
+                                })
 
                     # Only insert to DB if:
                     # 1. Cash balance has changed, OR
@@ -319,11 +474,30 @@ async def check_and_archive(force_insert: bool = False):
                     else:
                         logger.debug("No DB insert - no cash changes detected")
 
-                    if alerts:
-                        await notify_admins(
-                            "💰 <b>Cash balance change:</b>\n" + "\n".join(alerts),
-                            parse_mode="HTML"
-                        )
+                    if alerts_data:
+                        rows = [
+                            [
+                                cell("Currency", is_header=True),
+                                cell("Icon", is_header=True),
+                                cell("Change", is_header=True, align="right"),
+                                cell("Old Balance", is_header=True, align="right"),
+                                cell("New Balance", is_header=True, align="right")
+                            ]
+                        ]
+                        for a in alerts_data:
+                            rows.append([
+                                cell(a["currency"]),
+                                cell(a["emoji"]),
+                                cell(f"{a['diff']:+.4f}", align="right"),
+                                cell(f"{a['old']:.4f}", align="right"),
+                                cell(f"{a['new']:.4f}", align="right")
+                            ])
+                        
+                        blocks = [
+                            block_heading("💰 Cash Balance Change Alert"),
+                            block_table(rows, is_bordered=True, is_striped=True)
+                        ]
+                        await notify_admins_rich(blocks)
 
             except Exception as e:
                 logger.error(f"DB/Logic Error: {e}")
@@ -343,26 +517,39 @@ async def cmd_nav(m: types.Message):
             r.raise_for_status()
             d = r.json()
 
-            # Format with entire lines in inline code (monospace without blue
-            # box)
-            msg = f"<code>💰 NAV:      {d['NetLiquidation']:>+12.2f}</code>\n"
-            msg += f"<code>📈 Stock:    {d['StockMarketValue']:>+12.2f}</code>\n"
-            msg += f"<code>📊 Pnl:      {d['UnrealizedPnL']:>+12.2f}</code>\n"
-            msg += "-------------------\n"
-            msg += f"<code>📆 Day Pnl:  {d['DailyPnL']:>+12.2f}</code>\n"
-            msg += f"<code>📅 Day Rlz:  {d['DailyRealizedPnL']:>+12.2f}</code>\n"
-            msg += "-------------------\n"
-            msg += f"<code>💵 Base:     {d['TotalCashValue']:>+12.2f}</code>\n"
-            msg += f"<code>💶 EUR:      {d['EUR']:>+12.2f}</code>\n"
-            msg += f"<code>💵 USD:      {d['USD']:>+12.2f}</code>\n"
-            msg += f"<code>💷 GBP:      {d['GBP']:>+12.2f}</code>\n"
-            msg += "-------------------\n"
-            msg += f"<code>🛡️ Cushion:  {d['Cushion']:>12.6f}</code>\n"
-            msg += f"<code>🚀 BuyPwr:   {d['BuyingPower']:>12.2f}</code>\n"
-            msg += f"<code>💧 exLiq:    {d['ExcessLiquidity']:>12.2f}</code>\n"
-            msg += f"<code>🧱 margin:   {d['FullMaintMargin']:>12.2f}</code>"
+            rows = [
+                # Section 1: Net Liquidation
+                [cell(text_bold("Account Summary"), is_header=True, colspan=2)],
+                [cell("💰 Net Liquidation"), cell(f"{d['NetLiquidation']:+,.2f}", align="right")],
+                [cell("📈 Stock Value"), cell(f"{d['StockMarketValue']:+,.2f}", align="right")],
+                [cell("📊 Unrealized PnL"), cell(f"{d['UnrealizedPnL']:+,.2f}", align="right")],
+                
+                # Section 2: Daily PnL
+                [cell(text_bold("Daily Variation"), is_header=True, colspan=2)],
+                [cell("📆 Daily PnL"), cell(f"{d['DailyPnL']:+,.2f}", align="right")],
+                [cell("📅 Daily Realized PnL"), cell(f"{d['DailyRealizedPnL']:+,.2f}", align="right")],
+                
+                # Section 3: Cash & Currencies
+                [cell(text_bold("Cash Balances"), is_header=True, colspan=2)],
+                [cell("💵 Base Cash"), cell(f"{d['TotalCashValue']:+,.2f}", align="right")],
+                [cell("💶 EUR Cash"), cell(f"{d['EUR']:+,.2f}", align="right")],
+                [cell("💵 USD Cash"), cell(f"{d['USD']:+,.2f}", align="right")],
+                [cell("💷 GBP Cash"), cell(f"{d['GBP']:+,.2f}", align="right")],
+                
+                # Section 4: Risk & Margin
+                [cell(text_bold("Risk & Margin"), is_header=True, colspan=2)],
+                [cell("🛡️ Cushion"), cell(f"{d['Cushion']:.6f}", align="right")],
+                [cell("🚀 Buying Power"), cell(f"{d['BuyingPower']:+,.2f}", align="right")],
+                [cell("💧 Excess Liquidity"), cell(f"{d['ExcessLiquidity']:+,.2f}", align="right")],
+                [cell("🧱 Maint. Margin"), cell(f"{d['FullMaintMargin']:+,.2f}", align="right")]
+            ]
 
-            await m.answer(msg, parse_mode="HTML")
+            blocks = [
+                block_heading("Net Asset Value Report"),
+                block_table(rows, is_bordered=True, is_striped=True)
+            ]
+
+            await send_rich_message(m.chat.id, blocks)
         except httpx.HTTPStatusError as e:
             err_detail = e.response.text or str(e)
             logger.error(f"HTTP Error in /nav: {err_detail}")
@@ -370,7 +557,6 @@ async def cmd_nav(m: types.Message):
         except Exception as e:
             logger.error(f"Error in /nav: {e}", exc_info=True)
             await m.answer("❌ Error interno. Revisa los logs.")
-
 
 @dp.message(Command("pos", ignore_case=True))
 async def cmd_pos(m: types.Message):
@@ -393,38 +579,42 @@ async def cmd_pos(m: types.Message):
             options = sorted([p for p in positions if p.get(
                 'secType') == 'OPT'], key=lambda x: x['symbol'])
 
-            # Stocks table (8-char symbol width)
+            blocks = []
+
+            # Stocks table
             if stocks:
-                header = "Symbol  | Pos.  | Avg\n"
-                header += "--------|-------|-------------\n"
-
-                rows = []
+                blocks.append(block_heading("📈 Stocks"))
+                stock_rows = [
+                    [cell("Symbol", is_header=True), cell("Pos.", is_header=True, align="right"), cell("Avg Cost", is_header=True, align="right")]
+                ]
                 for p in stocks:
-                    sym = str(p['symbol']).ljust(8)
-                    qty = str(p['qty']).ljust(6)
-                    cost = f"{p['cost']:.4f}"
-                    rows.append(f"{sym}| {qty}| {cost}")
+                    stock_rows.append([
+                        cell(p['symbol']),
+                        cell(f"{p['qty']:.0f}", align="right"),
+                        cell(f"{p['cost']:.4f}", align="right")
+                    ])
+                blocks.append(block_table(stock_rows, is_bordered=True, is_striped=True))
 
-                msg = "� *Stocks*\n\n```\n" + \
-                    header + "\n".join(rows) + "\n```"
-                await m.answer(msg, parse_mode="Markdown")
-
-            # Options table (20-char symbol width, spaces removed)
+            # Options table
             if options:
-                header = "Symbol              | Pos.  | Avg\n"
-                header += "--------------------|-------|-------------\n"
-
-                rows = []
+                option_rows = [
+                    [cell("Symbol", is_header=True), cell("Pos.", is_header=True, align="right"), cell("Avg Cost", is_header=True, align="right")]
+                ]
                 for p in options:
-                    # Remove spaces from option symbols for compact display
-                    sym = str(p['symbol']).replace(' ', '').ljust(20)
-                    qty = str(p['qty']).ljust(6)
-                    cost = f"{p['cost']:.4f}"
-                    rows.append(f"{sym}| {qty}| {cost}")
+                    sym = str(p['symbol']).replace(' ', '')
+                    option_rows.append([
+                        cell(sym),
+                        cell(f"{p['qty']:.0f}", align="right"),
+                        cell(f"{p['cost']:.4f}", align="right")
+                    ])
+                opt_table = block_table(option_rows, is_bordered=True, is_striped=True)
+                blocks.append(block_details("📋 Open Options Positions", [opt_table]))
 
-                msg = "📋 *Options*\n\n```\n" + \
-                    header + "\n".join(rows) + "\n```"
-                await m.answer(msg, parse_mode="Markdown")
+            if not blocks:
+                await m.answer("📭 No open positions.")
+                return
+
+            await send_rich_message(m.chat.id, blocks)
 
         except httpx.HTTPStatusError as e:
             err_detail = e.response.text or str(e)
@@ -544,24 +734,36 @@ async def process_opt_details(callback: types.CallbackQuery):
             exp_fmt = f"{expiry[0:4]}-{expiry[4:6]}-{expiry[6:8]}" if len(expiry) == 8 else expiry
             display = f"{underlying} {right} {strike_fmt} {exp_fmt}"
 
-            msg = (
-                f"📊 *Option Details: {display}*\n\n"
-                f"🧮 *Greeks:*\n"
-                f"• Δ Delta: `{d['delta']:.4f}`\n"
-                f"• γ Gamma: `{d['gamma']:.4f}`\n"
-                f"• ν Vega: `{d['vega']:.4f}`\n"
-                f"• θ Theta: `{d['theta']:.4f}`\n\n"
-                f"📈 *Market Data:*\n"
-                f"• IV: `{d['implied_vol'] * 100:.2f}%`\n"
-                f"• Underl. Price: `{d['underlying_price']:.2f}`\n"
-                f"• Volume: `{d['volume']}`\n"
-                f"• Open Interest: `{d['open_interest']}`\n\n"
-                f"💰 *Last Trade:*\n"
-                f"• Price: `{d['last_price']:.2f}`\n"
-                f"• Date: `{d['last_date'] or 'N/A'}`"
-            )
+            greeks_table = block_table([
+                [cell("Metric", is_header=True), cell("Value", is_header=True, align="right")],
+                [cell("Delta Δ"), cell(f"{d['delta']:.4f}", align="right")],
+                [cell("Gamma γ"), cell(f"{d['gamma']:.4f}", align="right")],
+                [cell("Vega ν"), cell(f"{d['vega']:.4f}", align="right")],
+                [cell("Theta θ"), cell(f"{d['theta']:.4f}", align="right")]
+            ], is_bordered=True, is_striped=True)
 
-            await callback.message.answer(msg, parse_mode="Markdown")
+            mkt_table = block_table([
+                [cell("Metric", is_header=True), cell("Value", is_header=True, align="right")],
+                [cell("Implied Vol (IV)"), cell(f"{d['implied_vol'] * 100:.2f}%", align="right")],
+                [cell("Underlying Price"), cell(f"{d['underlying_price']:.2f}", align="right")],
+                [cell("Volume"), cell(str(d['volume']), align="right")],
+                [cell("Open Interest"), cell(str(d['open_interest']), align="right")]
+            ], is_bordered=True, is_striped=True)
+
+            last_trade_table = block_table([
+                [cell("Metric", is_header=True), cell("Value", is_header=True, align="right")],
+                [cell("Last Price"), cell(f"{d['last_price']:.2f}", align="right")],
+                [cell("Date"), cell(str(d['last_date'] or 'N/A'), align="right")]
+            ], is_bordered=True, is_striped=True)
+
+            blocks = [
+                block_heading(f"📊 Option Details: {display}"),
+                block_details("🧮 Greeks", [greeks_table], is_open=True),
+                block_details("📈 Market Data", [mkt_table]),
+                block_details("💰 Last Trade", [last_trade_table])
+            ]
+
+            await send_rich_message(callback.message.chat.id, blocks)
             await callback.answer()
 
         except httpx.HTTPStatusError as e:
@@ -1201,11 +1403,34 @@ async def cmd_orders(m: types.Message):
                 await m.answer("📭 No active orders.")
                 return
 
-            msg = "📋 *Active Orders*:\n"
+            rows = [
+                [
+                    cell("Action", is_header=True),
+                    cell("Qty", is_header=True, align="right"),
+                    cell("Symbol", is_header=True),
+                    cell("Price", is_header=True, align="right"),
+                    cell("Status", is_header=True)
+                ]
+            ]
             for o in orders[:15]:  # Limit to 15
-                msg += f"• `{o['action']} {o['totalQuantity']} {o['symbol']} @ {o['lmtPrice'] or 'MKT'}` ({o['status']})\n"
+                price_str = f"{o['lmtPrice']:.2f}" if o.get('lmtPrice') else "MKT"
+                rows.append([
+                    cell(o['action']),
+                    cell(f"{o['totalQuantity']:.0f}", align="right"),
+                    cell(o['symbol']),
+                    cell(price_str, align="right"),
+                    cell(o['status'])
+                ])
 
-            await m.answer(msg, parse_mode="Markdown")
+            blocks = [
+                block_heading("📋 Active Orders"),
+                block_table(rows, is_bordered=True, is_striped=True)
+            ]
+            if len(orders) > 15:
+                blocks.append(block_paragraph(f"... and {len(orders) - 15} more active orders."))
+
+            await send_rich_message(m.chat.id, blocks)
+
         except httpx.HTTPStatusError as e:
             err_detail = e.response.text or str(e)
             logger.error(f"HTTP Error in /orders: {err_detail}")
@@ -1230,14 +1455,39 @@ async def cmd_trades(m: types.Message):
                 await m.answer("📭 No trades executed today.")
                 return
 
-            msg = "🤝 *Recent Trades*:\n"
+            rows = [
+                [
+                    cell("Time", is_header=True),
+                    cell("Side", is_header=True),
+                    cell("Qty", is_header=True, align="right"),
+                    cell("Symbol", is_header=True),
+                    cell("Price", is_header=True, align="right")
+                ]
+            ]
             for t in trades[:15]:
-                # 2025-12-30T10:00:00 -> 10:00:00
-                time_str = t['time'].split('T')[1].split(
-                    '.')[0] if 'T' in t['time'] else t['time']
-                msg += f"• `{time_str}`: {t['side']} `{t['shares']}` *{t['symbol']}* @ `{t['price']}`\n"
+                time_str = t['time'].split('T')[1].split('.')[0] if 'T' in t['time'] else t['time']
+                
+                price_val = float(t['price']) if t.get('price') is not None else 0.0
+                shares_val = float(t['shares']) if t.get('shares') is not None else 0.0
+                shares_str = f"{shares_val:.0f}" if shares_val.is_integer() else f"{shares_val:.2f}"
+                
+                rows.append([
+                    cell(time_str),
+                    cell(t['side']),
+                    cell(shares_str, align="right"),
+                    cell(t['symbol']),
+                    cell(f"{price_val:.2f}", align="right")
+                ])
 
-            await m.answer(msg, parse_mode="Markdown")
+            blocks = [
+                block_heading("🤝 Today's Trades"),
+                block_table(rows, is_bordered=True, is_striped=True)
+            ]
+            if len(trades) > 15:
+                blocks.append(block_paragraph(f"... and {len(trades) - 15} more trades today."))
+
+            await send_rich_message(m.chat.id, blocks)
+
         except httpx.HTTPStatusError as e:
             err_detail = e.response.text or str(e)
             logger.error(f"HTTP Error in /trades: {err_detail}")
@@ -1259,7 +1509,21 @@ async def cmd_quote(m: types.Message):
 
     symbol = args[1].upper()
 
-    msg = await m.answer(f"🔍 Getting quote for {symbol}...")
+    status_msg = None
+    msg_id = None
+    try:
+        status_msg = await send_rich_message(
+            m.chat.id,
+            [
+                block_heading("Market Quote"),
+                block_paragraph(f"Fetching snapshot for {symbol}..."),
+                block_thinking()
+            ]
+        )
+        if status_msg:
+            msg_id = status_msg.get("message_id") if isinstance(status_msg, dict) else getattr(status_msg, "message_id", None)
+    except Exception as e:
+        logger.warning(f"Could not send thinking status message: {e}")
 
     async with httpx.AsyncClient(timeout=30.0) as client:
         try:
@@ -1267,21 +1531,18 @@ async def cmd_quote(m: types.Message):
             r.raise_for_status()
             data = r.json()
 
-            # Format output
-            # Symbol: SPY
-            # Price: 420.50
-            # Bid/Ask: 420.40 / 420.60
+            rows = [
+                [cell("Metric", is_header=True), cell("Value", is_header=True, align="right")]
+            ]
+            rows.append([cell("Price"), cell(f"{data['price']:.2f}", align="right")])
+            if data.get('bid') is not None:
+                rows.append([cell("Bid"), cell(f"{data['bid']:.2f}", align="right")])
+            if data.get('ask') is not None:
+                rows.append([cell("Ask"), cell(f"{data['ask']:.2f}", align="right")])
 
-            out = f"📈 *Quote: {data['symbol']}*\n\n"
-            out += f"💰 Price: `{data['price']:.2f}`\n"
-            if data.get('bid') and data.get('ask'):
-                out += f"↔️ Bid/Ask: `{data['bid']:.2f} / {data['ask']:.2f}`\n"
-
-            # Format timestamp: 2025-12-30T16:26:52.882122Z -> 2025-12-30
-            # 16:26:52
+            # Format timestamp
             ts_str = data['timestamp']
             if 'T' in ts_str:
-                # Convert Z string to timezone aware datetime if possible, otherwise just string manipulation
                 try:
                     dt_utc = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
                     tz = ZoneInfo(settings.TZ)
@@ -1293,17 +1554,33 @@ async def cmd_quote(m: types.Message):
                      ts_formatted = f"{date_part} {time_part}"
             else:
                 ts_formatted = ts_str
-            
-            out += f"⏱ `{ts_formatted}`"
 
-            await msg.edit_text(out, parse_mode="Markdown")
+            blocks = [
+                block_heading(f"📈 Quote: {data['symbol']}"),
+                block_table(rows, is_bordered=True),
+                block_paragraph(f"⏱ {ts_formatted}")
+            ]
+
+            if msg_id:
+                await edit_message_to_rich(m.chat.id, msg_id, blocks)
+            else:
+                await send_rich_message(m.chat.id, blocks)
+
         except httpx.HTTPStatusError as e:
             err_detail = e.response.text or str(e)
             logger.error(f"HTTP Error in /quote: {err_detail}")
-            await msg.edit_text(f"❌ API Error: {err_detail}")
+            err_msg = f"❌ API Error: {err_detail}"
+            if msg_id:
+                await edit_message_to_rich(m.chat.id, msg_id, [block_paragraph(err_msg)])
+            else:
+                await m.answer(err_msg)
         except Exception as e:
             logger.error(f"Error in /quote: {e}", exc_info=True)
-            await msg.edit_text("❌ Error interno. Revisa los logs.")
+            err_msg = "❌ Error interno. Revisa los logs."
+            if msg_id:
+                await edit_message_to_rich(m.chat.id, msg_id, [block_paragraph(err_msg)])
+            else:
+                await m.answer(err_msg)
 
 
 @dp.message(Command("contract", ignore_case=True))
@@ -1317,6 +1594,21 @@ async def cmd_contract(m: types.Message):
         return
 
     symbol = args[1].upper()
+    status_msg = None
+    msg_id = None
+    try:
+        status_msg = await send_rich_message(
+            m.chat.id,
+            [
+                block_heading("Contract Search"),
+                block_paragraph(f"Searching contract for {symbol}..."),
+                block_thinking()
+            ]
+        )
+        if status_msg:
+            msg_id = status_msg.get("message_id") if isinstance(status_msg, dict) else getattr(status_msg, "message_id", None)
+    except Exception as e:
+        logger.warning(f"Could not send thinking status message: {e}")
 
     async with httpx.AsyncClient(timeout=30.0) as client:
         try:
@@ -1325,26 +1617,52 @@ async def cmd_contract(m: types.Message):
             details = r.json()
 
             if not details:
-                await m.answer(f"❌ No contract found for {symbol}.")
+                err_msg = f"❌ No contract found for {symbol}."
+                if msg_id:
+                    await edit_message_to_rich(m.chat.id, msg_id, [block_paragraph(err_msg)])
+                else:
+                    await m.answer(err_msg)
                 return
 
-            out = f"📄 *Contract Details ({len(details)})*:\n\n"
-            for d in details[:3]:  # Limit to 3 detailed views
-                out += f"🔹 *{d['symbol']}* ({d['secType']})\n"
-                out += f"   • Name: {d['longName']}\n"
-                out += f"   • ID: `{d['conId']}` | Exch: {d['exchange']}\n"
+            blocks = [
+                block_heading(f"📄 Contract Details ({len(details)})")
+            ]
+            for d in details[:5]:  # Limit to 5 detailed views
+                title = f"🔹 {d['symbol']} ({d['secType']}) - {d.get('longName') or 'No Name'}"
+                rows = [
+                    [cell("Field", is_header=True), cell("Value", is_header=True)]
+                ]
+                rows.append([cell("conId"), cell(str(d['conId']))])
+                rows.append([cell("Exchange"), cell(d['exchange'])])
                 if d.get('isin'):
-                    out += f"   • ISIN: `{d['isin']}`\n"
-                out += "\n"
+                    rows.append([cell("ISIN"), cell(d['isin'])])
+                
+                block_t = block_table(rows, is_bordered=True)
+                blocks.append(block_details(title, [block_t], is_open=False))
 
-            await m.answer(out, parse_mode="Markdown")
+            if len(details) > 5:
+                blocks.append(block_paragraph(f"... and {len(details) - 5} more contracts found."))
+
+            if msg_id:
+                await edit_message_to_rich(m.chat.id, msg_id, blocks)
+            else:
+                await send_rich_message(m.chat.id, blocks)
+
         except httpx.HTTPStatusError as e:
             err_detail = e.response.text or str(e)
             logger.error(f"HTTP Error in /contract: {err_detail}")
-            await m.answer(f"❌ API Error: {err_detail}")
+            err_msg = f"❌ API Error: {err_detail}"
+            if msg_id:
+                await edit_message_to_rich(m.chat.id, msg_id, [block_paragraph(err_msg)])
+            else:
+                await m.answer(err_msg)
         except Exception as e:
             logger.error(f"Error in /contract: {e}", exc_info=True)
-            await m.answer("❌ Error interno. Revisa los logs.")
+            err_msg = "❌ Error interno. Revisa los logs."
+            if msg_id:
+                await edit_message_to_rich(m.chat.id, msg_id, [block_paragraph(err_msg)])
+            else:
+                await m.answer(err_msg)
 
 
 @dp.message(Command("chain", ignore_case=True))
@@ -1358,7 +1676,21 @@ async def cmd_chain(m: types.Message):
         return
 
     symbol = args[1].upper()
-    msg = await m.answer(f"🔍 Fetching option chain for {symbol}...")
+    status_msg = None
+    msg_id = None
+    try:
+        status_msg = await send_rich_message(
+            m.chat.id,
+            [
+                block_heading("Option Chain"),
+                block_paragraph(f"Fetching option chain for {symbol}..."),
+                block_thinking()
+            ]
+        )
+        if status_msg:
+            msg_id = status_msg.get("message_id") if isinstance(status_msg, dict) else getattr(status_msg, "message_id", None)
+    except Exception as e:
+        logger.warning(f"Could not send thinking status message: {e}")
 
     async with httpx.AsyncClient(timeout=30.0) as client:
         try:
@@ -1367,56 +1699,93 @@ async def cmd_chain(m: types.Message):
             chains = r.json()
 
             if not chains:
-                await msg.edit_text(f"❌ No option chain found for {symbol}.")
+                err_msg = f"❌ No option chain found for {symbol}."
+                if msg_id:
+                    await edit_message_to_rich(m.chat.id, msg_id, [block_paragraph(err_msg)])
+                else:
+                    await m.answer(err_msg)
                 return
 
-            # Use the first chain (usually SMART exchange)
             chain = chains[0]
             expirations = chain.get('expirations', [])
             strikes = chain.get('strikes', [])
 
-            # Format expiration dates (YYYYMMDD -> YYYY-MM-DD)
-            def fmt_exp(exp):
-                return f"{exp[:4]}-{exp[4:6]}-{exp[6:]}"
-
             # Group expirations by month for compact display
             exp_by_month = {}
-            for exp in expirations[:24]:  # Limit to next 24 expirations
+            for exp in expirations:
                 month_key = exp[:6]  # YYYYMM
                 if month_key not in exp_by_month:
                     exp_by_month[month_key] = []
                 exp_by_month[month_key].append(exp[6:])  # Just the day
 
-            out = f"📊 <b>Option Chain: {symbol}</b>\n"
-            out += f"<code>📅 Exchange: {chain['exchange']} | Mult: {chain['multiplier']}</code>\n\n"
-
-            out += "<b>Expirations:</b>\n"
-            for month_key in sorted(exp_by_month.keys())[:6]:  # Show 6 months
+            # Build Expirations Table
+            exp_rows = [
+                [cell("Month", is_header=True), cell("Days", is_header=True)]
+            ]
+            sorted_months = sorted(exp_by_month.keys())
+            for month_key in sorted_months[:12]:
                 year = month_key[:4]
                 month = month_key[4:6]
-                # Limit days per month
-                days = ", ".join(exp_by_month[month_key][:8])
-                out += f"<code>{year}-{month}: {days}</code>\n"
-            if len(exp_by_month) > 6:
-                out += f"<code>... +{len(exp_by_month) - 6} more months</code>\n"
+                days = ", ".join(exp_by_month[month_key])
+                exp_rows.append([
+                    cell(f"{year}-{month}"),
+                    cell(days)
+                ])
+            if len(sorted_months) > 12:
+                exp_rows.append([
+                    cell("..."),
+                    cell(f"and {len(sorted_months) - 12} more months")
+                ])
 
-            # Show strike range
+            exp_table = block_table(exp_rows, is_bordered=True, is_striped=True)
+            exp_details = block_details(f"📅 Expirations ({len(expirations)})", [exp_table], is_open=True)
+
+            # Build Strikes Table
+            strike_details = None
             if strikes:
                 min_strike = min(strikes)
                 max_strike = max(strikes)
                 mid_idx = len(strikes) // 2
                 sample_strikes = strikes[max(0, mid_idx - 3):mid_idx + 4]
-                out += f"<code>Strikes: {min_strike:.0f} - {max_strike:.0f} ({len(strikes)} total)</code>\n"
-                out += f"<code>Sample: {', '.join(f'{s:.0f}' for s in sample_strikes)}</code>"
+                sample_str = ", ".join(f"{s:.2f}".rstrip('0').rstrip('.') for s in sample_strikes)
 
-            await msg.edit_text(out, parse_mode="HTML")
+                strike_rows = [
+                    [cell("Property", is_header=True), cell("Value", is_header=True)],
+                    [cell("Range"), cell(f"{f'{min_strike:.2f}'.rstrip('0').rstrip('.')} - {f'{max_strike:.2f}'.rstrip('0').rstrip('.')}")],
+                    [cell("Total Strikes"), cell(str(len(strikes)))],
+                    [cell("Sample Strikes"), cell(sample_str)]
+                ]
+                strike_table = block_table(strike_rows, is_bordered=True)
+                strike_details = block_details(f"🎯 Strike Prices ({len(strikes)})", [strike_table], is_open=False)
+
+            blocks = [
+                block_heading(f"📊 Option Chain: {symbol}"),
+                block_paragraph(f"Exchange: {chain['exchange']} | Mult: {chain['multiplier']}"),
+                exp_details
+            ]
+            if strike_details:
+                blocks.append(strike_details)
+
+            if msg_id:
+                await edit_message_to_rich(m.chat.id, msg_id, blocks)
+            else:
+                await send_rich_message(m.chat.id, blocks)
+
         except httpx.HTTPStatusError as e:
             err_detail = e.response.text or str(e)
             logger.error(f"HTTP Error in /chain: {err_detail}")
-            await msg.edit_text(f"❌ API Error: {err_detail}")
+            err_msg = f"❌ API Error: {err_detail}"
+            if msg_id:
+                await edit_message_to_rich(m.chat.id, msg_id, [block_paragraph(err_msg)])
+            else:
+                await m.answer(err_msg)
         except Exception as e:
             logger.error(f"Error in /chain: {e}", exc_info=True)
-            await msg.edit_text("❌ Error interno. Revisa los logs.")
+            err_msg = "❌ Error interno. Revisa los logs."
+            if msg_id:
+                await edit_message_to_rich(m.chat.id, msg_id, [block_paragraph(err_msg)])
+            else:
+                await m.answer(err_msg)
 
 # Scheduler
 
@@ -1432,16 +1801,23 @@ async def check_token_expiry():
         days_left = (expiry_date - get_now().replace(tzinfo=None)).days
 
         if 0 <= days_left <= 10:
-            await notify_admins(
-                f"⚠️ *IBKR Flex Token Expiry Alert*\n\n"
-                f"Your token will expire in *{days_left} days* (`{expiry_str}`).\n"
-                f"Please generate a new one to avoid service interruption."
-            )
+            blocks = [
+                block_heading("⚠️ IBKR Flex Token Expiry Alert"),
+                block_paragraph(text_concat(
+                    "Your token will expire in ", text_bold(f"{days_left} days"), 
+                    " (", text_code(expiry_str), ").\nPlease generate a new one to avoid service interruption."
+                ))
+            ]
+            await notify_admins_rich(blocks)
         elif days_left < 0:
-            await notify_admins(
-                f"❌ *IBKR Flex Token EXPIRED*\n\n"
-                f"Your token expired on `{expiry_str}`. Flex reports will fail until a new token is provided."
-            )
+            blocks = [
+                block_heading("❌ IBKR Flex Token EXPIRED"),
+                block_paragraph(text_concat(
+                    "Your token expired on ", text_code(expiry_str), 
+                    ". Flex reports will fail until a new token is provided."
+                ))
+            ]
+            await notify_admins_rich(blocks)
     except Exception as e:
         logger.error(f"Error checking token expiry: {e}")
 
@@ -1502,22 +1878,59 @@ async def scheduled_flex_report(
         email_status = await asyncio.to_thread(FlexReporter.send_email, html, subject)
 
         # Send unified Telegram Message (Summary + Dividends etc)
-        combined_msg = f"📅 <b>{report_type} Flex Query Date</b>: <code>{date_range_html}</code>\n\n"
+        blocks = [
+            block_heading(f"📅 {report_type} Flex Query Report"),
+            block_paragraph(f"Period: {date_range_html}")
+        ]
 
         for msg in telegram_msgs:
-            if msg.strip():
-                # Add each section directly, since it's already HTML formatted
-                combined_msg += f"{msg.strip()}\n\n"
+            if not msg.strip():
+                continue
+            
+            lines = [line.strip() for line in msg.split('\n') if line.strip()]
+            if not lines:
+                continue
+            
+            first_line = lines[0]
+            # Detect Cash Report
+            if "Cash Report" in first_line:
+                cash_rows = [[cell("Currency", is_header=True), cell("Ending Cash", is_header=True, align="right")]]
+                for line in lines[1:]:
+                    try:
+                        cur = line.split("<b>")[1].split("</b>")[0]
+                        val = line.split("<code>")[1].split("</code>")[0]
+                        cash_rows.append([cell(cur), cell(val, align="right")])
+                    except Exception:
+                        pass
+                
+                blocks.append(block_details("💰 Cash Summary", [
+                    block_table(cash_rows, is_bordered=True, is_striped=True)
+                ], is_open=True))
+            
+            # Detect Dividends
+            elif "Dividends" in first_line:
+                div_blocks = []
+                for line in lines[1:]:
+                    div_blocks.append(block_paragraph(html_to_rich(line)))
+                blocks.append(block_details("💸 Dividends Received", div_blocks))
+                
+            # Fallback for any other section
+            else:
+                section_blocks = []
+                for line in lines[1:]:
+                    section_blocks.append(block_paragraph(html_to_rich(line)))
+                blocks.append(block_details(first_line, section_blocks))
 
         # Add completion status with Archiving info
-        combined_msg += (
-            f"📊 <b>{report_type} Report Generated</b>\n"
-            f"Date: <code>{date_range_html}</code>\n"
-            f"Archived: <code>{archive_status}</code>\n"
-            f"Email: <code>{email_status}</code>"
-        )
+        meta_spans = [
+            text_bold(f"{report_type} Report Generated\n"),
+            text_plain("Date: "), text_code(date_range_html), text_plain("\n"),
+            text_plain("Archived: "), text_code(archive_status), text_plain("\n"),
+            text_plain("Email: "), text_code(email_status)
+        ]
+        blocks.append(block_paragraph(text_concat(*meta_spans)))
         
-        await notify_admins(combined_msg, parse_mode="HTML")
+        await notify_admins_rich(blocks)
     except Exception as e:
         logger.error(f"{report_type} Scheduler/Report Error: {e}")
         if not local_date:
@@ -1572,7 +1985,21 @@ async def cmd_delta(m: types.Message):
     if m.from_user.id not in settings.allowed_ids_list:
         return
 
-    await m.answer("Checking deltas for short positions... ⏳")
+    status_msg = None
+    msg_id = None
+    try:
+        status_msg = await send_rich_message(
+            m.chat.id,
+            [
+                block_heading("Delta Report"),
+                block_paragraph("Checking deltas for short positions..."),
+                block_thinking()
+            ]
+        )
+        if status_msg:
+            msg_id = status_msg.get("message_id") if isinstance(status_msg, dict) else getattr(status_msg, "message_id", None)
+    except Exception as e:
+        logger.warning(f"Could not send thinking status message: {e}")
 
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
@@ -1582,7 +2009,11 @@ async def cmd_delta(m: types.Message):
                 headers=API_HEADERS
             )
             if r_pos.status_code != 200:
-                await m.answer(f"❌ Failed to fetch positions (HTTP {r_pos.status_code})")
+                err_msg = f"❌ Failed to fetch positions (HTTP {r_pos.status_code})"
+                if msg_id:
+                    await edit_message_to_rich(m.chat.id, msg_id, [block_paragraph(err_msg)])
+                else:
+                    await m.answer(err_msg)
                 return
 
             positions = r_pos.json()
@@ -1596,7 +2027,11 @@ async def cmd_delta(m: types.Message):
             ]
 
             if not short_options:
-                await m.answer("✅ No short option positions found.")
+                empty_msg = "✅ No short option positions found."
+                if msg_id:
+                    await edit_message_to_rich(m.chat.id, msg_id, [block_paragraph(empty_msg)])
+                else:
+                    await m.answer(empty_msg)
                 return
 
             # Fetch Greeks for all short options in parallel (max 3 concurrent)
@@ -1693,27 +2128,21 @@ async def cmd_delta(m: types.Message):
             results = [r for r in raw_results if r is not None]
 
             if not results:
-                await m.answer("✅ No short option positions found.")
+                empty_msg = "✅ No short option positions found."
+                if msg_id:
+                    await edit_message_to_rich(m.chat.id, msg_id, [block_paragraph(empty_msg)])
+                else:
+                    await m.answer(empty_msg)
                 return
 
             # Sort: contracts with delta first (by abs desc), then None deltas at the bottom
             results.sort(key=lambda x: (x['delta'] is None, -abs(x['delta']) if x['delta'] is not None else 0))
 
-            # Calculate max widths for alignment
-            max_qty = max(len(f"{r['qty']:.0f}") for r in results)
-            max_und = 5
-            max_rs = max(len(r['right_strike']) for r in results)
-
             # Build digest message
             high_count = sum(1 for r in results if r['high'])
             no_data_count = sum(1 for r in results if r['delta'] is None)
-            header = f"📊 <b>Delta Report — {len(results)} Short Position(s)</b>\n"
-            if high_count:
-                header += f"⚠️ <b>{high_count} above threshold ({settings.DELTA_ALERT_THRESHOLD})</b>\n"
-            if no_data_count:
-                header += f"⚪ <b>{no_data_count} without delta data</b>\n"
 
-            # Calculate TV strings first to determine max_tv
+            # Calculate TV strings
             for r in results:
                 r['tv_str'] = ""
                 r['low_tv'] = False
@@ -1723,24 +2152,20 @@ async def cmd_delta(m: types.Message):
                     if r['intrinsic'] > 0 and r['time_value'] <= (0.01 * r['strike']):
                         r['low_tv'] = True
 
-            has_any_tv = any(r['tv_str'] != "" for r in results)
-            max_tv = max(len(r['tv_str']) for r in results if r['tv_str'] != "") if has_any_tv else 0
-            has_any_low_tv = any(r['low_tv'] for r in results)
+            rows = [
+                [
+                    cell("", is_header=True),
+                    cell("Qty", is_header=True, align="right"),
+                    cell("Und.", is_header=True),
+                    cell("Opt.", is_header=True),
+                    cell("Expiry", is_header=True),
+                    cell("Delta", is_header=True, align="right"),
+                    cell("TV", is_header=True, align="right"),
+                    cell("Age", is_header=True, align="right")
+                ]
+            ]
 
-            option_lines = []
             for r in results:
-                if r['delta'] is None:
-                    marker = "⚪"
-                    delta_str = "  —  "
-                else:
-                    marker = "🔴" if r['high'] else "🟢"
-                    delta_str = f"{abs(r['delta']):.2f}"
-                qty_str = f"{r['qty']:.0f}".rjust(max_qty)
-                und_padded = r['underlying'].ljust(max_und)
-                rs_padded = r['right_strike'].ljust(max_rs)
-                age = r['age']
-
-                # Format expiry to DDMMMyy for consistent alignment (e.g. 19Jun26)
                 display_expiry = r['expiry']
                 if len(display_expiry) == 8 and display_expiry.isdigit():
                     try:
@@ -1751,32 +2176,52 @@ async def cmd_delta(m: types.Message):
                     except Exception:
                         pass
 
-                # Append TV column if available
-                tv_part = ""
-                if r['tv_str']:
-                    tv_padded = r['tv_str'].ljust(max_tv)
-                    if has_any_low_tv:
-                        warning_indicator = "⚠️" if r['low_tv'] else "  "
-                        tv_part = f" {tv_padded}{warning_indicator}"
-                    else:
-                        tv_part = f" {tv_padded}"
-                elif has_any_tv:
-                    # Only add empty spacing if this line has an age, to keep it aligned
-                    if age:
-                        padding_len = max_tv + (2 if has_any_low_tv else 0) + 1
-                        tv_part = " " * padding_len
+                marker = "⚪" if r['delta'] is None else ("🔴" if r['high'] else "🟢")
+                delta_val = "—" if r['delta'] is None else f"{abs(r['delta']):.2f}"
+                tv_val = r['tv_str']
+                if r['low_tv']:
+                    tv_val += " ⚠️"
 
-                line = f"{marker} <code>{qty_str} {und_padded} {rs_padded} {display_expiry} Δ{delta_str}{tv_part} {age}</code>"
-                option_lines.append(line.strip())
+                rows.append([
+                    cell(marker),
+                    cell(f"{r['qty']:.0f}", align="right"),
+                    cell(r['underlying']),
+                    cell(r['right_strike']),
+                    cell(display_expiry),
+                    cell(delta_val, align="right"),
+                    cell(tv_val, align="right"),
+                    cell(r['age'], align="right")
+                ])
 
-            options_text = "\n".join(option_lines)
-            message = f"{header}\n{options_text}\n\n🔴 abs(Δ) &gt; {settings.DELTA_ALERT_THRESHOLD}  🟢 abs(Δ) ≤ {settings.DELTA_ALERT_THRESHOLD}  ⚪ no data\n⚠️ low time value (≤ 1% strike)"
+            blocks = [
+                block_heading(f"📊 Delta Report — {len(results)} Short Position(s)"),
+                block_table(rows, is_bordered=True, is_striped=True, caption="🔴 abs(Δ) > {}  🟢 abs(Δ) <= {}  ⚪ no data\n⚠️ low time value (≤ 1% strike)".format(settings.DELTA_ALERT_THRESHOLD, settings.DELTA_ALERT_THRESHOLD))
+            ]
 
-            await m.answer(message, parse_mode="HTML")
+            alert_lines = []
+            if high_count:
+                alert_lines.append(f"⚠️ {high_count} above threshold ({settings.DELTA_ALERT_THRESHOLD})")
+            if no_data_count:
+                alert_lines.append(f"⚪ {no_data_count} without delta data")
+
+            if alert_lines:
+                blocks.insert(1, block_paragraph("\n".join(alert_lines)))
+
+            if msg_id:
+                await edit_message_to_rich(m.chat.id, msg_id, blocks)
+            else:
+                await send_rich_message(m.chat.id, blocks)
 
     except Exception as e:
         logger.error(f"Error in /delta: {e}", exc_info=True)
-        await m.answer("❌ Error interno. Revisa los logs.")
+        err_msg = "❌ Error interno. Revisa los logs."
+        if msg_id:
+            try:
+                await edit_message_to_rich(m.chat.id, msg_id, [block_paragraph(err_msg)])
+            except Exception:
+                await m.answer(err_msg)
+        else:
+            await m.answer(err_msg)
 
 
 async def main():

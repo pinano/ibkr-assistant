@@ -577,22 +577,22 @@ async def get_option_risk(symbol: str):
         t_last = getattr(t, 'last', None)
         t_time = getattr(t, 'lastTime', None)
 
+        def safe_float(val):
+            return val if (val is not None and not math.isnan(val)) else 0.0
+
         return OptionGreeks(
             symbol=symbol,
-            delta=g.delta if (g and g.delta is not None) else 0.0,
-            gamma=g.gamma if (g and g.gamma is not None) else 0.0,
-            vega=g.vega if (g and g.vega is not None) else 0.0,
-            theta=g.theta if (g and g.theta is not None) else 0.0,
-            implied_vol=g.impliedVol if (
-                g and g.impliedVol is not None) else 0.0,
-            underlying_price=g.undPrice if (
-                g and g.undPrice is not None) else 0.0,
+            delta=safe_float(g.delta) if g else 0.0,
+            gamma=safe_float(g.gamma) if g else 0.0,
+            vega=safe_float(g.vega) if g else 0.0,
+            theta=safe_float(g.theta) if g else 0.0,
+            implied_vol=safe_float(g.impliedVol) if g else 0.0,
+            underlying_price=safe_float(g.undPrice) if g else 0.0,
             volume=int(t_vol) if (
                 t_vol is not None and not math.isnan(t_vol)) else 0,
             open_interest=int(t_oi) if (
                 t_oi is not None and not math.isnan(t_oi)) else 0,
-            last_price=t_last if (
-                t_last is not None and not math.isnan(t_last)) else 0.0,
+            last_price=safe_float(t_last),
             last_date=t_time.strftime("%Y-%m-%d %H:%M:%S") if t_time else datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         )
 

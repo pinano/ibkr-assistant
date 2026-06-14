@@ -23,7 +23,7 @@ async def get_orders():
     for t in trades:
         items.append(OrderItem(
             orderId=t.order.orderId,
-            symbol=t.contract.localSymbol,
+            symbol=t.contract.localSymbol or t.contract.symbol,
             action=t.order.action,
             totalQuantity=float(t.order.totalQuantity),
             orderType=t.order.orderType,
