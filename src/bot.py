@@ -356,21 +356,92 @@ class EditMessageTextRich(TelegramMethod[Union[types.Message, bool]]):
     rich_message: dict = Field(..., alias="rich_message")
     reply_markup: Optional[Any] = Field(None, alias="reply_markup")
 
+def text_to_html(text_obj) -> str:
+    import html
+    if isinstance(text_obj, str):
+        return html.escape(text_obj)
+    if isinstance(text_obj, dict):
+        t_type = text_obj.get("type")
+        if t_type == "plain":
+            return html.escape(text_obj.get("text", ""))
+        elif t_type == "bold":
+            return f"<b>{text_to_html(text_obj.get('text'))}</b>"
+        elif t_type == "italic":
+            return f"<i>{text_to_html(text_obj.get('text'))}</i>"
+        elif t_type == "code":
+            return f"<code>{text_to_html(text_obj.get('text'))}</code>"
+        elif t_type == "url":
+            url = html.escape(text_obj.get("url", ""))
+            return f'<a href="{url}">{text_to_html(text_obj.get("text"))}</a>'
+        elif t_type == "texts":
+            return "".join(text_to_html(x) for x in text_obj.get("texts", []))
+    if isinstance(text_obj, list):
+        return "".join(text_to_html(x) for x in text_obj)
+    return ""
+
+def block_to_html(block_obj) -> str:
+    if isinstance(block_obj, dict):
+        b_type = block_obj.get("type")
+        if b_type == "paragraph":
+            return f"<p>{text_to_html(block_obj.get('text'))}</p>"
+        elif b_type == "sectionHeading":
+            return f"<h1>{text_to_html(block_obj.get('text'))}</h1>"
+        elif b_type == "thinking":
+            return "<tg-thinking></tg-thinking>"
+        elif b_type == "table":
+            attrs = []
+            if block_obj.get("is_bordered"):
+                attrs.append('border="1"')
+            attrs_str = " " + " ".join(attrs) if attrs else ""
+            
+            caption_html = ""
+            if "caption" in block_obj:
+                caption_html = f"<caption>{text_to_html(block_obj.get('caption'))}</caption>"
+            
+            rows_html = []
+            for row in block_obj.get("cells", []):
+                row_cells = []
+                for c in row:
+                    tag = "th" if c.get("is_header") else "td"
+                    c_attrs = []
+                    if c.get("align"):
+                        c_attrs.append(f'align="{c.get("align")}"')
+                    if c.get("valign"):
+                        c_attrs.append(f'valign="{c.get("valign")}"')
+                    if c.get("colspan"):
+                        c_attrs.append(f'colspan="{c.get("colspan")}"')
+                    if c.get("rowspan"):
+                        c_attrs.append(f'rowspan="{c.get("rowspan")}"')
+                    c_attrs_str = " " + " ".join(c_attrs) if c_attrs else ""
+                    cell_text = text_to_html(c.get("text")) if "text" in c else ""
+                    row_cells.append(f"<{tag}{c_attrs_str}>{cell_text}</{tag}>")
+                rows_html.append(f"<tr>{''.join(row_cells)}</tr>")
+            
+            return f"<table{attrs_str}>{caption_html}{''.join(rows_html)}</table>"
+        elif b_type == "details":
+            open_attr = " open" if block_obj.get("is_open") else ""
+            summary_html = f"<summary>{text_to_html(block_obj.get('title'))}</summary>"
+            content_html = "".join(block_to_html(b) for b in block_obj.get("blocks", []))
+            return f"<details{open_attr}>{summary_html}{content_html}</details>"
+    return ""
+
 async def send_rich_message(chat_id: int, blocks: list[dict], reply_markup=None) -> types.Message:
+    html_content = "".join(block_to_html(b) for b in blocks)
     return await bot(
         SendRichMessage(
             chat_id=chat_id,
-            rich_message={"blocks": blocks},
+            rich_message={"html": html_content},
             reply_markup=reply_markup
         )
     )
 
 async def edit_message_to_rich(chat_id: int, message_id: int, blocks: list[dict], reply_markup=None) -> types.Message:
+    html_content = "".join(block_to_html(b) for b in blocks)
     return await bot(
         EditMessageTextRich(
             chat_id=chat_id,
             message_id=message_id,
-            rich_message={"blocks": blocks},
+            rich_message={"html": html_content},
             reply_markup=reply_markup
         )
     )
