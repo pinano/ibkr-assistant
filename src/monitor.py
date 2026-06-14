@@ -225,7 +225,7 @@ class Monitor:
                     a['low_tv'] = False
                     if a['intrinsic'] is not None and a['time_value'] is not None:
                         tv_val = f"{a['time_value']:+.2f}".replace("+0.", "+.").replace("-0.", "-.")
-                        a['tv_str'] = f"TV{tv_val}"
+                        a['tv_str'] = tv_val
                         if a['intrinsic'] > 0 and a['time_value'] <= (0.01 * a['strike']):
                             a['low_tv'] = True
 
@@ -267,7 +267,7 @@ class Monitor:
                             padding_len = max_tv + (2 if has_any_low_tv else 0) + 1
                             tv_part = " " * padding_len
 
-                    line = f"{marker} <code>{qty_str} {und_padded} {rs_padded} {display_expiry} Δ{delta_str}{tv_part} {age}</code>"
+                    line = f"<code>{qty_str} {und_padded} {rs_padded} {display_expiry} {marker}{delta_str}{tv_part} {age}</code>"
                     option_lines.append(line.strip())
 
                 options_text = "\n".join(option_lines)
