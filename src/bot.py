@@ -2194,8 +2194,9 @@ async def render_delta_report(chat_id: int, msg_id: Optional[int] = None, sort_b
                 [
                     cell("Qty", is_header=True, align="right"),
                     cell("Option", is_header=True),
-                    cell("Delta", is_header=True, align="right"),
-                    cell("TV", is_header=True, align="right"),
+                    cell("Expiry", is_header=True),
+                    cell("Delta", is_header=True, align="center"),
+                    cell("TV", is_header=True, align="center"),
                     cell("Age", is_header=True, align="right")
                 ]
             ]
@@ -2229,13 +2230,14 @@ async def render_delta_report(chat_id: int, msg_id: Optional[int] = None, sort_b
                 else:
                     tv_cell_val = text_plain(tv_val)
 
-                option_text = f"{r['underlying']} {r['right_strike']} {display_expiry}"
+                option_text = f"{r['underlying']} {r['right_strike']}"
 
                 rows.append([
                     cell(f"{r['qty']:.0f}", align="right"),
                     cell(option_text),
-                    cell(delta_cell_val, align="right"),
-                    cell(tv_cell_val, align="right"),
+                    cell(display_expiry),
+                    cell(delta_cell_val, align="center"),
+                    cell(tv_cell_val, align="center"),
                     cell(r['age'], align="right")
                 ])
 

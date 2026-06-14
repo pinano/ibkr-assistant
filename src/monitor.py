@@ -212,7 +212,7 @@ class Monitor:
                 
                 logger.info(f"Global Delta Alert: {len(delta_alerts)} contract(s) above threshold")
 
-                # Calculate TV strings first to determine max_tv and combined contract strings
+                # Calculate TV strings first to determine max_tv and contract/expiry details
                 for a in delta_alerts:
                     a['tv_str'] = ""
                     a['low_tv'] = False
@@ -232,10 +232,12 @@ class Monitor:
                             display_expiry = f"{dt.day:02d}{month_str}{dt.year % 100:02d}"
                         except Exception:
                             pass
-                    a['opt_str'] = f"{a['underlying']} {a['right_strike']} {display_expiry}"
+                    a['display_expiry'] = display_expiry
+                    a['opt_details'] = f"{a['underlying']} {a['right_strike']}"
 
                 max_qty = max(len(f"{a['qty']:.0f}") for a in delta_alerts)
-                max_opt = max(len(a['opt_str']) for a in delta_alerts)
+                max_opt = max(len(a['opt_details']) for a in delta_alerts)
+                max_exp = max(len(a['display_expiry']) for a in delta_alerts)
 
                 header = f"⚠️ <b>High Delta Warning — {len(delta_alerts)} Short Position(s)</b>\n"
 
@@ -248,7 +250,8 @@ class Monitor:
                     marker = "🔴"
                     delta_str = f"{abs(a['delta']):.2f}"
                     qty_str = f"{a['qty']:.0f}".rjust(max_qty)
-                    opt_padded = a['opt_str'].ljust(max_opt)
+                    opt_padded = a['opt_details'].ljust(max_opt)
+                    exp_padded = a['display_expiry'].ljust(max_exp)
                     age = a['age']
 
                     # Append TV column if available
@@ -265,7 +268,7 @@ class Monitor:
                             padding_len = max_tv + (2 if has_any_low_tv else 0) + 1
                             tv_part = " " * padding_len
 
-                    line = f"<code>{qty_str} {opt_padded} {marker}{delta_str}{tv_part} {age}</code>"
+                    line = f"<code>{qty_str} {opt_padded} {exp_padded} {marker}{delta_str}{tv_part} {age}</code>"
                     option_lines.append(line.strip())
 
                 options_text = "\n".join(option_lines)
