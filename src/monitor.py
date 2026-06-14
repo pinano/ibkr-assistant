@@ -212,14 +212,7 @@ class Monitor:
                 
                 logger.info(f"Global Delta Alert: {len(delta_alerts)} contract(s) above threshold")
 
-                # Calculate max widths for alignment
-                max_qty = max(len(f"{a['qty']:.0f}") for a in delta_alerts)
-                max_und = 5
-                max_rs = max(len(a['right_strike']) for a in delta_alerts)
-
-                header = f"⚠️ <b>High Delta Warning — {len(delta_alerts)} Short Position(s)</b>\n"
-
-                # Calculate TV strings first to determine max_tv
+                # Calculate TV strings first to determine max_tv and combined contract strings
                 for a in delta_alerts:
                     a['tv_str'] = ""
                     a['low_tv'] = False
@@ -228,19 +221,6 @@ class Monitor:
                         a['tv_str'] = tv_val
                         if a['intrinsic'] > 0 and a['time_value'] <= (0.01 * a['strike']):
                             a['low_tv'] = True
-
-                has_any_tv = any(a['tv_str'] != "" for a in delta_alerts)
-                max_tv = max(len(a['tv_str']) for a in delta_alerts if a['tv_str'] != "") if has_any_tv else 0
-                has_any_low_tv = any(a['low_tv'] for a in delta_alerts)
-
-                option_lines = []
-                for a in delta_alerts:
-                    marker = "🔴"
-                    delta_str = f"{abs(a['delta']):.2f}"
-                    qty_str = f"{a['qty']:.0f}".rjust(max_qty)
-                    und_padded = a['underlying'].ljust(max_und)
-                    rs_padded = a['right_strike'].ljust(max_rs)
-                    age = a['age']
 
                     # Format expiry to DDMMMyy for consistent alignment (e.g. 19Jun26)
                     display_expiry = a['expiry']
@@ -252,6 +232,24 @@ class Monitor:
                             display_expiry = f"{dt.day:02d}{month_str}{dt.year % 100:02d}"
                         except Exception:
                             pass
+                    a['opt_str'] = f"{a['underlying']} {a['right_strike']} {display_expiry}"
+
+                max_qty = max(len(f"{a['qty']:.0f}") for a in delta_alerts)
+                max_opt = max(len(a['opt_str']) for a in delta_alerts)
+
+                header = f"⚠️ <b>High Delta Warning — {len(delta_alerts)} Short Position(s)</b>\n"
+
+                has_any_tv = any(a['tv_str'] != "" for a in delta_alerts)
+                max_tv = max(len(a['tv_str']) for a in delta_alerts if a['tv_str'] != "") if has_any_tv else 0
+                has_any_low_tv = any(a['low_tv'] for a in delta_alerts)
+
+                option_lines = []
+                for a in delta_alerts:
+                    marker = "🔴"
+                    delta_str = f"{abs(a['delta']):.2f}"
+                    qty_str = f"{a['qty']:.0f}".rjust(max_qty)
+                    opt_padded = a['opt_str'].ljust(max_opt)
+                    age = a['age']
 
                     # Append TV column if available
                     tv_part = ""
@@ -267,7 +265,7 @@ class Monitor:
                             padding_len = max_tv + (2 if has_any_low_tv else 0) + 1
                             tv_part = " " * padding_len
 
-                    line = f"<code>{qty_str} {und_padded} {rs_padded} {display_expiry} {marker}{delta_str}{tv_part} {age}</code>"
+                    line = f"<code>{qty_str} {opt_padded} {marker}{delta_str}{tv_part} {age}</code>"
                     option_lines.append(line.strip())
 
                 options_text = "\n".join(option_lines)
