@@ -1,3 +1,13 @@
+## v2026.06.15 (2026-06-15)
+
+- refactor: simplify low theoretical value warning logic by integrating directly into option markers (f6b6aac)
+- refactor: migrate delta reports from rich table blocks to plain text messages and standardize option formatting (bb3d6dc)
+- feat: move expiry column to dedicated UI field in bot and monitor outputs (05d9b9c)
+- refactor: consolidate underlying, strike, and expiry into a single option string for cleaner delta alert formatting (dd8ac7b)
+- refactor: simplify quote command output using plain markdown and optimize contract table layout (927ccd7)
+- refactor: simplify time value formatting and transition cash balance alerts to HTML-formatted text notifications (211ce57)
+- feat: add dynamic sorting and inline keyboard controls to the delta report dashboard (ae41665)
+
 ## v2026.06.14.3 (2026-06-14)
 
 - fix: serialize custom blocks structure to Rich HTML strings inside send_rich_message and edit_message_to_rich to comply with Telegram InputRichMessage API schema (714731e)
