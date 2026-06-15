@@ -1574,11 +1574,39 @@ async def cmd_quote(m: types.Message):
 
     async with httpx.AsyncClient(timeout=30.0) as client:
         try:
+            # 1. Fetch market snapshot
             r = await client.get(f"{settings.WEB_SERVICE_URL}/market/snapshot/{symbol}", headers=API_HEADERS)
             r.raise_for_status()
             data = r.json()
 
-            out = f"📈 *Quote: {data['symbol']}*\n\n"
+            # 2. Fetch contract details in background to get the name and exchange
+            contract_info = ""
+            try:
+                base_symbol = symbol.split(':')[-1] if ':' in symbol else symbol
+                r_c = await client.get(f"{settings.WEB_SERVICE_URL}/contract/search?symbol={base_symbol}", headers=API_HEADERS)
+                if r_c.status_code == 200:
+                    details = r_c.json()
+                    if details:
+                        match = None
+                        # Find matching stock/cash or the first result
+                        for d in details:
+                            if d.get('symbol', '').upper() == base_symbol.upper():
+                                match = d
+                                break
+                        if not match:
+                            match = details[0]
+                        
+                        long_name = match.get('longName') or 'No Name'
+                        exchange = match.get('exchange') or 'Unknown'
+                        con_id = match.get('conId')
+                        contract_info = f"🏢 *{long_name}* ({exchange} | ID: `{con_id}`)\n"
+            except Exception as e:
+                logger.debug(f"Error fetching contract info in /quote: {e}")
+
+            out = f"📈 *Quote: {data['symbol']}*\n"
+            if contract_info:
+                out += contract_info
+            out += "\n"
             out += f"💰 Price: `{data['price']:.2f}`\n"
             if data.get('bid') is not None and data.get('ask') is not None:
                 out += f"↔️ Bid/Ask: `{data['bid']:.2f} / {data['ask']:.2f}`\n"
@@ -1623,18 +1651,8 @@ async def cmd_contract(m: types.Message):
 
     symbol = args[1].upper()
     status_msg = None
-    msg_id = None
     try:
-        status_msg = await send_rich_message(
-            m.chat.id,
-            [
-                block_heading("Contract Search"),
-                block_paragraph(f"Searching contract for {symbol}..."),
-                block_thinking()
-            ]
-        )
-        if status_msg:
-            msg_id = status_msg.get("message_id") if isinstance(status_msg, dict) else getattr(status_msg, "message_id", None)
+        status_msg = await m.answer(f"🔍 Searching contract for {symbol}... ⏳")
     except Exception as e:
         logger.warning(f"Could not send thinking status message: {e}")
 
@@ -1646,49 +1664,42 @@ async def cmd_contract(m: types.Message):
 
             if not details:
                 err_msg = f"❌ No contract found for {symbol}."
-                if msg_id:
-                    await edit_message_to_rich(m.chat.id, msg_id, [block_paragraph(err_msg)])
+                if status_msg:
+                    await status_msg.edit_text(err_msg)
                 else:
                     await m.answer(err_msg)
                 return
 
-            blocks = [
-                block_heading(f"📄 Contract Details ({len(details)})")
-            ]
-            for d in details[:5]:  # Limit to 5 detailed views
-                title = f"🔹 {d['symbol']} ({d['secType']}) - {d.get('longName') or 'No Name'}"
-                rows = [
-                    [cell("Field", is_header=True), cell("Value", is_header=True)]
-                ]
-                rows.append([cell("conId"), cell(str(d['conId']))])
-                rows.append([cell("Exchange"), cell(d['exchange'])])
+            out = f"📄 *Contract Details ({len(details)})*:\n\n"
+            for d in details[:3]:  # Limit to 3 detailed views
+                out += f"🔹 *{d['symbol']}* ({d['secType']})\n"
+                out += f"   • Name: {d.get('longName') or 'No Name'}\n"
+                out += f"   • ID: `{d['conId']}` | Exch: {d['exchange']}\n"
                 if d.get('isin'):
-                    rows.append([cell("ISIN"), cell(d['isin'])])
-                
-                block_t = block_table(rows, is_bordered=True)
-                blocks.append(block_details(title, [block_t], is_open=False))
+                    out += f"   • ISIN: `{d['isin']}`\n"
+                out += "\n"
 
-            if len(details) > 5:
-                blocks.append(block_paragraph(f"... and {len(details) - 5} more contracts found."))
+            if len(details) > 3:
+                out += f"... and {len(details) - 3} more contracts found."
 
-            if msg_id:
-                await edit_message_to_rich(m.chat.id, msg_id, blocks)
+            if status_msg:
+                await status_msg.edit_text(out, parse_mode="Markdown")
             else:
-                await send_rich_message(m.chat.id, blocks)
+                await m.answer(out, parse_mode="Markdown")
 
         except httpx.HTTPStatusError as e:
             err_detail = e.response.text or str(e)
             logger.error(f"HTTP Error in /contract: {err_detail}")
             err_msg = f"❌ API Error: {err_detail}"
-            if msg_id:
-                await edit_message_to_rich(m.chat.id, msg_id, [block_paragraph(err_msg)])
+            if status_msg:
+                await status_msg.edit_text(err_msg)
             else:
                 await m.answer(err_msg)
         except Exception as e:
             logger.error(f"Error in /contract: {e}", exc_info=True)
             err_msg = "❌ Internal error. Check logs."
-            if msg_id:
-                await edit_message_to_rich(m.chat.id, msg_id, [block_paragraph(err_msg)])
+            if status_msg:
+                await status_msg.edit_text(err_msg)
             else:
                 await m.answer(err_msg)
 
