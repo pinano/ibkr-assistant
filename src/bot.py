@@ -2194,14 +2194,17 @@ async def cmd_delta(m: types.Message):
             max_tv = max(len(r['tv_str']) for r in results if r['tv_str'] != "") if has_any_tv else 0
             option_lines = []
             for r in results:
+                if r['delta'] is None:
+                    delta_str = "  —  "
+                else:
+                    delta_str = f"{abs(r['delta']):.2f}"
+
                 if r['low_tv']:
                     marker = "⚠️"
                 elif r['delta'] is None:
                     marker = "⚪"
-                    delta_str = "  —  "
                 else:
                     marker = "🔴" if r['high'] else "🟢"
-                    delta_str = f"{abs(r['delta']):.2f}"
                 qty_str = f"{r['qty']:.0f}".rjust(max_qty)
                 und_padded = r['underlying'].ljust(max_und)
                 rs_padded = r['right_strike'].ljust(max_rs)
