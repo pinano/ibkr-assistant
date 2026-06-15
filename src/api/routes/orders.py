@@ -59,6 +59,10 @@ async def get_trades():
             continue
         seen_ids.add(eid)
 
+        commission_val = None
+        if getattr(f, 'commissionReport', None) is not None:
+            commission_val = float(f.commissionReport.commission)
+
         items.append(TradeItem(
             executionId=eid,
             symbol=f.contract.localSymbol or f.contract.symbol,
@@ -66,7 +70,8 @@ async def get_trades():
             side=f.execution.side,
             shares=float(f.execution.shares),
             price=f.execution.price,
-            orderId=f.execution.orderId
+            orderId=f.execution.orderId,
+            commission=commission_val
         ))
 
     items.sort(key=lambda x: x.time, reverse=True)

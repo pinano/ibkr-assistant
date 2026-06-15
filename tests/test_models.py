@@ -42,6 +42,7 @@ class TradeItem(BaseModel):
     shares: float
     price: float
     orderId: int
+    commission: Optional[float] = None
 
 
 class OrderItem(BaseModel):
@@ -137,6 +138,13 @@ class TestTradeItem:
     def test_shares_float(self):
         t = self._make(shares=5.5)
         assert t.shares == 5.5
+
+    def test_commission_optional(self):
+        t = self._make(commission=1.50)
+        assert t.commission == 1.50
+        
+        t2 = self._make()
+        assert t2.commission is None
 
     def test_missing_symbol_raises(self):
         with pytest.raises(Exception):
@@ -306,7 +314,7 @@ class TestTradeDeduplication:
 
     class FakeFill:
         def __init__(self, exec_id, symbol, time_str, side, shares, price, order_id,
-                     local_symbol=None):
+                     local_symbol=None, commission=None):
             self.execution = MagicMock()
             self.execution.execId = exec_id
             self.execution.side = side
@@ -317,6 +325,9 @@ class TestTradeDeduplication:
             self.contract.localSymbol = local_symbol or ""
             self.contract.symbol = symbol
             self.time = datetime.fromisoformat(time_str)
+            if commission is not None:
+                self.commissionReport = MagicMock()
+                self.commissionReport.commission = commission
 
     def _dedup(self, fills):
         """Mirror of dedup logic in get_trades()."""
@@ -327,6 +338,11 @@ class TestTradeDeduplication:
             if eid in seen_ids:
                 continue
             seen_ids.add(eid)
+            
+            commission_val = None
+            if getattr(f, 'commissionReport', None) is not None:
+                commission_val = float(f.commissionReport.commission)
+            
             items.append(dict(
                 executionId=eid,
                 symbol=f.contract.localSymbol or f.contract.symbol,
@@ -335,6 +351,7 @@ class TestTradeDeduplication:
                 shares=float(f.execution.shares),
                 price=f.execution.price,
                 orderId=f.execution.orderId,
+                commission=commission_val,
             ))
         items.sort(key=lambda x: x['time'], reverse=True)
         return items
@@ -377,6 +394,16 @@ class TestTradeDeduplication:
     def test_empty_fills_returns_empty(self):
         result = self._dedup([])
         assert result == []
+
+    def test_commission_extracted_when_present(self):
+        f = self.FakeFill("e1", "AAPL", "2026-06-14T10:00:00", "BOT", 10, 185.0, 1, commission=1.50)
+        result = self._dedup([f])
+        assert result[0]['commission'] == 1.50
+
+    def test_commission_none_when_missing(self):
+        f = self.FakeFill("e1", "AAPL", "2026-06-14T10:00:00", "BOT", 10, 185.0, 1)
+        result = self._dedup([f])
+        assert result[0]['commission'] is None
 
 
 

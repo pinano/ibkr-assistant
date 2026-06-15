@@ -1522,7 +1522,8 @@ async def cmd_trades(m: types.Message):
                     cell("Side", is_header=True),
                     cell("Qty", is_header=True, align="right"),
                     cell("Symbol", is_header=True),
-                    cell("Price", is_header=True, align="right")
+                    cell("Price", is_header=True, align="right"),
+                    cell("Comm", is_header=True, align="right")
                 ]
             ]
             for t in trades[:15]:
@@ -1532,12 +1533,16 @@ async def cmd_trades(m: types.Message):
                 shares_val = float(t['shares']) if t.get('shares') is not None else 0.0
                 shares_str = f"{shares_val:.0f}" if shares_val.is_integer() else f"{shares_val:.2f}"
                 
+                comm_val = t.get('commission')
+                comm_str = f"{float(comm_val):.2f}" if comm_val is not None else "-"
+                
                 rows.append([
                     cell(time_str),
                     cell(t['side']),
                     cell(shares_str, align="right"),
                     cell(t['symbol']),
-                    cell(f"{price_val:.2f}", align="right")
+                    cell(f"{price_val:.2f}", align="right"),
+                    cell(comm_str, align="right")
                 ])
 
             blocks = [

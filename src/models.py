@@ -90,6 +90,7 @@ class TradeItem(BaseModel):
     shares: float
     price: float
     orderId: int
+    commission: Optional[float] = None
 
 
 class ContractDetailsItem(BaseModel):
