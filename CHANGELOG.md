@@ -1,3 +1,7 @@
+## v2026.06.15.3 (2026-06-15)
+
+- feat: integrate contract metadata into market quotes and simplify UI for contract searches (45ecadf)
+
 ## v2026.06.15.2 (2026-06-15)
 
 - feat: update rebuild command to use cache and add rebuild-clean for fresh builds (ce2e07a)
