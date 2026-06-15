@@ -1,3 +1,7 @@
+## v2026.06.15.1 (2026-06-15)
+
+- refactor: centralize delta string formatting logic in option results display (e1b5865)
+
 ## v2026.06.15 (2026-06-15)
 
 - refactor: simplify low theoretical value warning logic by integrating directly into option markers (f6b6aac)
