@@ -328,6 +328,11 @@ class TestTradeDeduplication:
             if commission is not None:
                 self.commissionReport = MagicMock()
                 self.commissionReport.commission = commission
+                self.commissionReport.execId = exec_id
+            else:
+                self.commissionReport = MagicMock()
+                self.commissionReport.commission = 0.0
+                self.commissionReport.execId = ""
 
     def _dedup(self, fills):
         """Mirror of dedup logic in get_trades()."""
@@ -340,7 +345,7 @@ class TestTradeDeduplication:
             seen_ids.add(eid)
             
             commission_val = None
-            if getattr(f, 'commissionReport', None) is not None:
+            if getattr(f, 'commissionReport', None) is not None and f.commissionReport.execId == f.execution.execId:
                 commission_val = float(f.commissionReport.commission)
             
             items.append(dict(

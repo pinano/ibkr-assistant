@@ -43,6 +43,9 @@ async def get_trades():
     exec_filter = ExecutionFilter()
     fills = await client.reqExecutionsAsync(exec_filter)
 
+    # Wait briefly for commission reports to be received and processed by the event loop
+    await asyncio.sleep(0.2)
+
     logger.info(f"reqExecutionsAsync returned {len(fills)} fills")
 
     if not fills:
@@ -60,7 +63,7 @@ async def get_trades():
         seen_ids.add(eid)
 
         commission_val = None
-        if getattr(f, 'commissionReport', None) is not None:
+        if getattr(f, 'commissionReport', None) is not None and f.commissionReport.execId == f.execution.execId:
             commission_val = float(f.commissionReport.commission)
 
         items.append(TradeItem(
