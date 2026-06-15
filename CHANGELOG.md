@@ -1,3 +1,7 @@
+## v2026.06.15.2 (2026-06-15)
+
+- feat: update rebuild command to use cache and add rebuild-clean for fresh builds (ce2e07a)
+
 ## v2026.06.15.1 (2026-06-15)
 
 - refactor: centralize delta string formatting logic in option results display (e1b5865)
