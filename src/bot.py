@@ -2192,11 +2192,11 @@ async def cmd_delta(m: types.Message):
             max_exp = max(len(r['display_expiry']) for r in results)
             has_any_tv = any(r['tv_str'] != "" for r in results)
             max_tv = max(len(r['tv_str']) for r in results if r['tv_str'] != "") if has_any_tv else 0
-            has_any_low_tv = any(r['low_tv'] for r in results)
-
             option_lines = []
             for r in results:
-                if r['delta'] is None:
+                if r['low_tv']:
+                    marker = "⚠️"
+                elif r['delta'] is None:
                     marker = "⚪"
                     delta_str = "  —  "
                 else:
@@ -2211,16 +2211,9 @@ async def cmd_delta(m: types.Message):
                 # Append TV column if available
                 tv_part = ""
                 if r['tv_str']:
-                    tv_padded = r['tv_str'].ljust(max_tv)
-                    if has_any_low_tv:
-                        warning_indicator = "⚠️" if r['low_tv'] else "  "
-                        tv_part = f" {tv_padded}{warning_indicator}"
-                    else:
-                        tv_part = f" {tv_padded}"
+                    tv_part = f" {r['tv_str'].ljust(max_tv)}"
                 elif has_any_tv:
-                    if age:
-                        padding_len = max_tv + (2 if has_any_low_tv else 0) + 1
-                        tv_part = " " * padding_len
+                    tv_part = " " * (max_tv + 1)
 
                 age_part = f" {age}" if age else ""
                 line = f"{marker} <code>{qty_str} {und_padded} {rs_padded} {exp_padded} Δ{delta_str}{tv_part}{age_part}</code>"
