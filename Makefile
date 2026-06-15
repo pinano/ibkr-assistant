@@ -46,7 +46,7 @@ tail ?= all
 
 # Helper: Extract arguments for logs, restart, rebuild and shell commands
 # This allows using "make logs ibkr-api" instead of "make logs s=ibkr-api"
-SUPPORTED_COMMANDS := logs shell restart rebuild
+SUPPORTED_COMMANDS := logs shell restart rebuild rebuild-clean
 SUPPORTS_ARGS := $(filter $(firstword $(MAKECMDGOALS)),$(SUPPORTED_COMMANDS))
 ifneq "$(SUPPORTS_ARGS)" ""
   # The remaining arguments are the service names
@@ -164,21 +164,41 @@ else
 endif
 
 ##@help rebuild
-## Rebuilds image(s) from scratch and recreates container(s).
+## Rebuilds image(s) using Docker cache and recreates container(s).
 ## - All services: make rebuild
 ## - Specific service: make rebuild ibkr-api
 .PHONY: rebuild
-rebuild: ## Rebuild services from Dockerfile (usage: make rebuild [service])
+rebuild: ## Rebuild services using cache (usage: make rebuild [service])
 ifneq ($(strip $(SERVICE_ARGS)),)
 	@echo "Rebuilding service(s): $(SERVICE_ARGS)..."
-	$(COMPOSE) build --no-cache $(SERVICE_ARGS)
+	$(COMPOSE) build $(SERVICE_ARGS)
 	$(COMPOSE) up -d --force-recreate --remove-orphans $(SERVICE_ARGS)
 else ifdef s
 	@echo "Rebuilding service: $(s)..."
-	$(COMPOSE) build --no-cache $(s)
+	$(COMPOSE) build $(s)
 	$(COMPOSE) up -d --force-recreate --remove-orphans $(s)
 else
 	@echo "Rebuilding all services..."
+	$(COMPOSE) build
+	$(COMPOSE) up -d --force-recreate --remove-orphans
+endif
+
+##@help rebuild-clean
+## Rebuilds image(s) from scratch (bypassing cache) and recreates container(s).
+## - All services: make rebuild-clean
+## - Specific service: make rebuild-clean ibkr-api
+.PHONY: rebuild-clean
+rebuild-clean: ## Rebuild services bypassing cache (usage: make rebuild-clean [service])
+ifneq ($(strip $(SERVICE_ARGS)),)
+	@echo "Rebuilding clean service(s): $(SERVICE_ARGS)..."
+	$(COMPOSE) build --no-cache $(SERVICE_ARGS)
+	$(COMPOSE) up -d --force-recreate --remove-orphans $(SERVICE_ARGS)
+else ifdef s
+	@echo "Rebuilding clean service: $(s)..."
+	$(COMPOSE) build --no-cache $(s)
+	$(COMPOSE) up -d --force-recreate --remove-orphans $(s)
+else
+	@echo "Rebuilding all services cleanly..."
 	$(COMPOSE) build --no-cache
 	$(COMPOSE) up -d --force-recreate --remove-orphans
 endif
