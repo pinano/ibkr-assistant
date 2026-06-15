@@ -2012,26 +2012,12 @@ async def cmd_delta(m: types.Message):
     """On-demand check: show all short option positions with high delta."""
     if m.from_user.id not in settings.allowed_ids_list:
         return
-    await render_delta_report(m.chat.id, sort_by="delta")
 
-
-async def render_delta_report(chat_id: int, msg_id: Optional[int] = None, sort_by: str = "delta"):
-    """Fetch and display short option positions with deltas, optionally sorted."""
     status_msg = None
-    if not msg_id:
-        try:
-            status_msg = await send_rich_message(
-                chat_id,
-                [
-                    block_heading("Delta Report"),
-                    block_paragraph("Checking deltas for short positions..."),
-                    block_thinking()
-                ]
-            )
-            if status_msg:
-                msg_id = status_msg.get("message_id") if isinstance(status_msg, dict) else getattr(status_msg, "message_id", None)
-        except Exception as e:
-            logger.warning(f"Could not send thinking status message: {e}")
+    try:
+        status_msg = await m.answer("Checking deltas for short positions... ⏳")
+    except Exception as e:
+        logger.warning(f"Could not send status message: {e}")
 
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
@@ -2042,10 +2028,10 @@ async def render_delta_report(chat_id: int, msg_id: Optional[int] = None, sort_b
             )
             if r_pos.status_code != 200:
                 err_msg = f"❌ Failed to fetch positions (HTTP {r_pos.status_code})"
-                if msg_id:
-                    await edit_message_to_rich(chat_id, msg_id, [block_paragraph(err_msg)])
+                if status_msg:
+                    await status_msg.edit_text(err_msg)
                 else:
-                    await send_rich_message(chat_id, [block_paragraph(err_msg)])
+                    await m.answer(err_msg)
                 return
 
             positions = r_pos.json()
@@ -2060,10 +2046,10 @@ async def render_delta_report(chat_id: int, msg_id: Optional[int] = None, sort_b
 
             if not short_options:
                 empty_msg = "✅ No short option positions found."
-                if msg_id:
-                    await edit_message_to_rich(chat_id, msg_id, [block_paragraph(empty_msg)])
+                if status_msg:
+                    await status_msg.edit_text(empty_msg)
                 else:
-                    await send_rich_message(chat_id, [block_paragraph(empty_msg)])
+                    await m.answer(empty_msg)
                 return
 
             # Fetch Greeks for all short options in parallel (max 3 concurrent)
@@ -2161,47 +2147,34 @@ async def render_delta_report(chat_id: int, msg_id: Optional[int] = None, sort_b
 
             if not results:
                 empty_msg = "✅ No short option positions found."
-                if msg_id:
-                    await edit_message_to_rich(chat_id, msg_id, [block_paragraph(empty_msg)])
+                if status_msg:
+                    await status_msg.edit_text(empty_msg)
                 else:
-                    await send_rich_message(chat_id, [block_paragraph(empty_msg)])
+                    await m.answer(empty_msg)
                 return
 
-            # Sort based on requested sort key
-            if sort_by == "expiry":
-                results.sort(key=lambda x: (x['expiry'] or "99999999", x['underlying'] or "", x['right_strike'] or ""))
-            elif sort_by == "tv":
-                # Sort by Time Value ascending: lowest/negative time value first (critical)
-                results.sort(key=lambda x: (x['time_value'] is None, x['time_value'] if x['time_value'] is not None else 999999.0))
-            else:  # "delta"
-                results.sort(key=lambda x: (x['delta'] is None, -abs(x['delta']) if x['delta'] is not None else 0))
+            # Sort: contracts with delta first (by abs desc), then None deltas at the bottom
+            results.sort(key=lambda x: (x['delta'] is None, -abs(x['delta']) if x['delta'] is not None else 0))
 
             # Build digest message
             high_count = sum(1 for r in results if r['high'])
             no_data_count = sum(1 for r in results if r['delta'] is None)
+            header = f"📊 <b>Delta Report — {len(results)} Short Position(s)</b>\n"
+            if high_count:
+                header += f"⚠️ <b>{high_count} above threshold ({settings.DELTA_ALERT_THRESHOLD})</b>\n"
+            if no_data_count:
+                header += f"⚪ <b>{no_data_count} without delta data</b>\n"
 
-            # Calculate TV strings
+            # Calculate TV strings and format expiry
             for r in results:
                 r['tv_str'] = ""
                 r['low_tv'] = False
                 if r['intrinsic'] is not None and r['time_value'] is not None:
                     tv_val = f"{r['time_value']:.2f}"
-                    r['tv_str'] = tv_val
+                    r['tv_str'] = f"tV{tv_val}"
                     if r['intrinsic'] > 0 and r['time_value'] <= (0.01 * r['strike']):
                         r['low_tv'] = True
 
-            rows = [
-                [
-                    cell("Qty", is_header=True, align="right"),
-                    cell("Option", is_header=True),
-                    cell("Expiry", is_header=True),
-                    cell("Delta", is_header=True, align="center"),
-                    cell("TV", is_header=True, align="center"),
-                    cell("Age", is_header=True, align="right")
-                ]
-            ]
-
-            for r in results:
                 display_expiry = r['expiry']
                 if len(display_expiry) == 8 and display_expiry.isdigit():
                     try:
@@ -2211,113 +2184,66 @@ async def render_delta_report(chat_id: int, msg_id: Optional[int] = None, sort_b
                         display_expiry = f"{dt.day:02d}{month_str}{dt.year % 100:02d}"
                     except Exception:
                         pass
+                r['display_expiry'] = display_expiry
 
-                marker = "⚪" if r['delta'] is None else ("🔴" if r['high'] else "🟢")
+            max_qty = max(len(f"{r['qty']:.0f}") for r in results)
+            max_und = max(len(r['underlying']) for r in results)
+            max_rs = max(len(r['right_strike']) for r in results)
+            max_exp = max(len(r['display_expiry']) for r in results)
+            has_any_tv = any(r['tv_str'] != "" for r in results)
+            max_tv = max(len(r['tv_str']) for r in results if r['tv_str'] != "") if has_any_tv else 0
+            has_any_low_tv = any(r['low_tv'] for r in results)
+
+            option_lines = []
+            for r in results:
                 if r['delta'] is None:
-                    delta_text = f"{marker} —"
-                    delta_cell_val = text_plain(delta_text)
+                    marker = "⚪"
+                    delta_str = "  —  "
                 else:
-                    delta_text = f"{marker} {abs(r['delta']):.2f}"
-                    if r['high']:
-                        delta_cell_val = text_bold(delta_text)
+                    marker = "🔴" if r['high'] else "🟢"
+                    delta_str = f"{abs(r['delta']):.2f}"
+                qty_str = f"{r['qty']:.0f}".rjust(max_qty)
+                und_padded = r['underlying'].ljust(max_und)
+                rs_padded = r['right_strike'].ljust(max_rs)
+                exp_padded = r['display_expiry'].ljust(max_exp)
+                age = r['age']
+
+                # Append TV column if available
+                tv_part = ""
+                if r['tv_str']:
+                    tv_padded = r['tv_str'].ljust(max_tv)
+                    if has_any_low_tv:
+                        warning_indicator = "⚠️" if r['low_tv'] else "  "
+                        tv_part = f" {tv_padded}{warning_indicator}"
                     else:
-                        delta_cell_val = text_plain(delta_text)
+                        tv_part = f" {tv_padded}"
+                elif has_any_tv:
+                    if age:
+                        padding_len = max_tv + (2 if has_any_low_tv else 0) + 1
+                        tv_part = " " * padding_len
 
-                tv_val = r['tv_str']
-                if r['low_tv']:
-                    tv_text = f"{tv_val} ⚠️"
-                    tv_cell_val = text_bold(tv_text)
-                else:
-                    tv_cell_val = text_plain(tv_val)
+                age_part = f" {age}" if age else ""
+                line = f"{marker} <code>{qty_str} {und_padded} {rs_padded} {exp_padded} Δ{delta_str}{tv_part}{age_part}</code>"
+                option_lines.append(line.strip())
 
-                option_text = f"{r['underlying']} {r['right_strike']}"
+            options_text = "\n".join(option_lines)
+            message = f"{header}\n{options_text}\n\n🔴 abs(Δ) &gt; {settings.DELTA_ALERT_THRESHOLD}  🟢 abs(Δ) ≤ {settings.DELTA_ALERT_THRESHOLD}  ⚪ no data\n⚠️ low time value (≤ 1% strike)"
 
-                rows.append([
-                    cell(f"{r['qty']:.0f}", align="right"),
-                    cell(option_text),
-                    cell(display_expiry),
-                    cell(delta_cell_val, align="center"),
-                    cell(tv_cell_val, align="center"),
-                    cell(r['age'], align="right")
-                ])
-
-            blocks = [
-                block_heading(f"📊 Delta Report — {len(results)} Short Position(s)"),
-                block_table(rows, is_bordered=True, is_striped=True, caption="🔴 abs(Δ) > {}  🟢 abs(Δ) <= {}  ⚪ no data\n⚠️ low time value (≤ 1% strike)".format(settings.DELTA_ALERT_THRESHOLD, settings.DELTA_ALERT_THRESHOLD))
-            ]
-
-            alert_lines = []
-            if high_count:
-                alert_lines.append(f"⚠️ {high_count} above threshold ({settings.DELTA_ALERT_THRESHOLD})")
-            if no_data_count:
-                alert_lines.append(f"⚪ {no_data_count} without delta data")
-
-            if alert_lines:
-                blocks.insert(1, block_paragraph("\n".join(alert_lines)))
-
-            # Build inline keyboard markup
-            builder = InlineKeyboardBuilder()
-            builder.row(
-                types.InlineKeyboardButton(
-                    text="🎯 Delta ✓" if sort_by == "delta" else "🎯 Delta",
-                    callback_data="delta_sort:delta"
-                ),
-                types.InlineKeyboardButton(
-                    text="📅 Expiry ✓" if sort_by == "expiry" else "📅 Expiry",
-                    callback_data="delta_sort:expiry"
-                ),
-                types.InlineKeyboardButton(
-                    text="⏳ TV ✓" if sort_by == "tv" else "⏳ TV",
-                    callback_data="delta_sort:tv"
-                )
-            )
-            reply_markup = builder.as_markup()
-
-            if msg_id:
-                await edit_message_to_rich(chat_id, msg_id, blocks, reply_markup=reply_markup)
+            if status_msg:
+                await status_msg.edit_text(message, parse_mode="HTML")
             else:
-                await send_rich_message(chat_id, blocks, reply_markup=reply_markup)
+                await m.answer(message, parse_mode="HTML")
 
     except Exception as e:
-        logger.error(f"Error in /delta rendering: {e}", exc_info=True)
+        logger.error(f"Error in /delta: {e}", exc_info=True)
         err_msg = "❌ Internal error. Check logs."
-        if msg_id:
+        if status_msg:
             try:
-                await edit_message_to_rich(chat_id, msg_id, [block_paragraph(err_msg)])
+                await status_msg.edit_text(err_msg)
             except Exception:
-                await send_rich_message(chat_id, [block_paragraph(err_msg)])
+                await m.answer(err_msg)
         else:
-            await send_rich_message(chat_id, [block_paragraph(err_msg)])
-
-
-@dp.callback_query(F.data.startswith("delta_sort:"))
-async def process_delta_sort(callback: types.CallbackQuery):
-    """Callback handler for sorting the delta report."""
-    if callback.from_user.id not in settings.allowed_ids_list:
-        await callback.answer("Unauthorized.", show_alert=True)
-        return
-
-    sort_by = callback.data.split(":")[1]
-
-    # Prevent redundant processing if already sorted by this column
-    already_active = False
-    if callback.message and callback.message.reply_markup:
-        for row in callback.message.reply_markup.inline_keyboard:
-            for btn in row:
-                if btn.callback_data == callback.data and "✓" in btn.text:
-                    already_active = True
-                    break
-
-    if already_active:
-        await callback.answer("Already sorted by this column.")
-        return
-
-    await callback.answer("Re-sorting delta report...")
-    await render_delta_report(
-        callback.message.chat.id,
-        msg_id=callback.message.message_id,
-        sort_by=sort_by
-    )
+            await m.answer(err_msg)
 
 
 
