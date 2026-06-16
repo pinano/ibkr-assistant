@@ -1,3 +1,7 @@
+## v2026.06.16.1 (2026-06-16)
+
+- chore: update project dependencies in requirements.txt (881934e)
+
 ## v2026.06.16 (2026-06-16)
 
 - feat: add admin notifications for scheduled Flex Report retry attempts and errors (78329d2)
