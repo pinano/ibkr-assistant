@@ -1,3 +1,10 @@
+## v2026.06.16 (2026-06-16)
+
+- feat: add admin notifications for scheduled Flex Report retry attempts and errors (78329d2)
+- feat: upgrade dividend reports to tabular format with descriptive parsing and add API connection error notifications (85d3479)
+- fix: add execution ID validation to commission reporting and introduce delay for data synchronization (b61e0ac)
+- feat: add optional commission field to TradeItem and display in bot trade summary (45c1423)
+
 ## v2026.06.15.3 (2026-06-15)
 
 - feat: integrate contract metadata into market quotes and simplify UI for contract searches (45ecadf)
