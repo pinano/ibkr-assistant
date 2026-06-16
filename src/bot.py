@@ -1928,6 +1928,29 @@ async def scheduled_flex_report(
         ]
 
         for msg in telegram_msgs:
+            if isinstance(msg, dict):
+                if msg.get("type") == "dividends":
+                    div_headers = [
+                        cell("Ticker", is_header=True),
+                        cell("Shares", is_header=True, align="right"),
+                        cell("Div/Share", is_header=True, align="right"),
+                        cell("Total", is_header=True, align="right"),
+                        cell("Concept", is_header=True)
+                    ]
+                    div_rows = [div_headers]
+                    for item in msg["data"]:
+                        div_rows.append([
+                            cell(item["symbol"]),
+                            cell(item["qty"], align="right"),
+                            cell(item["rate"], align="right"),
+                            cell(item["amount"], align="right"),
+                            cell(item["concept"])
+                        ])
+                    blocks.append(block_details(msg["title"], [
+                        block_table(div_rows, is_bordered=True, is_striped=True)
+                    ], is_open=True))
+                continue
+
             if not msg.strip():
                 continue
             
@@ -1951,13 +1974,13 @@ async def scheduled_flex_report(
                     block_table(cash_rows, is_bordered=True, is_striped=True)
                 ], is_open=True))
             
-            # Detect Dividends
+            # Detect Dividends (fallback)
             elif "Dividends" in first_line:
                 div_blocks = []
                 for line in lines[1:]:
                     div_blocks.append(block_paragraph(html_to_rich(line)))
                 blocks.append(block_details("💸 Dividends Received", div_blocks))
-                
+            
             # Fallback for any other section
             else:
                 section_blocks = []

@@ -261,3 +261,77 @@ class TestEuropeanSymbolParsing:
     def test_fractional_strike(self):
         r = parse_european_symbol("P SAP 20260220 250.5")
         assert r["strike"] == 250.5
+
+
+# ======================================================================
+# parse_dividend_description tests
+# ======================================================================
+
+import re
+
+def parse_dividend_description(description: str, total_amount: float):
+    # Match the rate and currency
+    # e.g., "CASH DIVIDEND USD 1.452 PER SHARE"
+    rate_match = re.search(r"DIVIDEND\s+([A-Z]{3})\s+([0-9.]+)\s+PER\s+SHARE", description, re.IGNORECASE)
+    
+    currency = None
+    rate = None
+    qty = None
+    concept = "Dividend"
+    
+    if rate_match:
+        currency = rate_match.group(1).upper()
+        rate = float(rate_match.group(2))
+        if rate > 0:
+            qty = round(total_amount / rate, 4)
+            # If it is close to an integer, round to int
+            if abs(qty - round(qty)) < 1e-4:
+                qty = int(round(qty))
+    
+    # Extract concept: usually the text in the last set of parentheses
+    # e.g., "(Ordinary Dividend)"
+    concept_match = re.search(r"\(([^)]+)\)\s*$", description)
+    if concept_match:
+        concept = concept_match.group(1).strip()
+    else:
+        # Clean description by removing prefix ticker/ISIN if possible
+        # e.g. "HSY(US4278661081) CASH DIVIDEND" -> "CASH DIVIDEND"
+        cleaned_desc = re.sub(r"^[A-Z0-9.\s]+\([^)]+\)\s*", "", description, flags=re.IGNORECASE)
+        if cleaned_desc.strip():
+            concept = cleaned_desc.strip()
+        else:
+            concept = description.strip()
+            
+    return qty, rate, concept
+
+
+class TestParseDividendDescription:
+    """Tests for parse_dividend_description — parses dividend txn descriptions."""
+
+    def test_ordinary_dividend_us(self):
+        desc = "HSY(US4278661081) CASH DIVIDEND USD 1.452 PER SHARE (Ordinary Dividend)"
+        qty, rate, concept = parse_dividend_description(desc, 58.08)
+        assert qty == 40
+        assert rate == 1.452
+        assert concept == "Ordinary Dividend"
+
+    def test_ordinary_dividend_european(self):
+        desc = "O(US7561091049) CASH DIVIDEND USD 0.2705 PER SHARE (Ordinary Dividend)"
+        qty, rate, concept = parse_dividend_description(desc, 40.575)
+        assert qty == 150
+        assert rate == 0.2705
+        assert concept == "Ordinary Dividend"
+
+    def test_no_parentheses_fallback(self):
+        desc = "AAPL(US0378331005) CASH DIVIDEND USD 0.25 PER SHARE"
+        qty, rate, concept = parse_dividend_description(desc, 25.0)
+        assert qty == 100
+        assert rate == 0.25
+        assert concept == "CASH DIVIDEND USD 0.25 PER SHARE"
+
+    def test_no_match(self):
+        desc = "Some random text description without dividend keywords"
+        qty, rate, concept = parse_dividend_description(desc, 10.0)
+        assert qty is None
+        assert rate is None
+        assert concept == "Some random text description without dividend keywords"

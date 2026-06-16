@@ -2,6 +2,7 @@
 import os
 import ssl
 import smtplib
+import re
 import xml.etree.ElementTree as ET
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -28,6 +29,42 @@ def fmt_num(val, precision=2):
                                                             precision)).replace('.', ',')
     except (ValueError, TypeError):
         return val
+
+
+def parse_dividend_description(description: str, total_amount: float):
+    # Match the rate and currency
+    # e.g., "CASH DIVIDEND USD 1.452 PER SHARE"
+    rate_match = re.search(r"DIVIDEND\s+([A-Z]{3})\s+([0-9.]+)\s+PER\s+SHARE", description, re.IGNORECASE)
+    
+    currency = None
+    rate = None
+    qty = None
+    concept = "Dividend"
+    
+    if rate_match:
+        currency = rate_match.group(1).upper()
+        rate = float(rate_match.group(2))
+        if rate > 0:
+            qty = round(total_amount / rate, 4)
+            # If it is close to an integer, round to int
+            if abs(qty - round(qty)) < 1e-4:
+                qty = int(round(qty))
+    
+    # Extract concept: usually the text in the last set of parentheses
+    # e.g., "(Ordinary Dividend)"
+    concept_match = re.search(r"\(([^)]+)\)\s*$", description)
+    if concept_match:
+        concept = concept_match.group(1).strip()
+    else:
+        # Clean description by removing prefix ticker/ISIN if possible
+        # e.g. "HSY(US4278661081) CASH DIVIDEND" -> "CASH DIVIDEND"
+        cleaned_desc = re.sub(r"^[A-Z0-9.\s]+\([^)]+\)\s*", "", description, flags=re.IGNORECASE)
+        if cleaned_desc.strip():
+            concept = cleaned_desc.strip()
+        else:
+            concept = description.strip()
+            
+    return qty, rate, concept
 
 
 class FlexReporter:
@@ -150,13 +187,24 @@ class FlexReporter:
             html.append('<table> <thead> <tr><td>tckr</td> <td>date</td> <td>cur</td> <td>fxRate</td> <td>amount</td> <td>type</td> <td>description</td> <td>exchg</td></tr> </thead> <tbody>')
             cash_txs = list(root.iter('CashTransaction'))
             sortchildrenby(cash_txs, 'dateTime', 'symbol')
+            dividends_data = []
             for i, attrs in enumerate(cash_txs):
                 a = attrs.get
                 if a('type') == 'Dividends':
                     has_dividends = True
-                    if not dividend_msg:
-                        dividend_msg = "💸 <b>Dividends</b>\n"
-                    dividend_msg += f"• <b>{a('symbol')}</b>: <code>{a('currency')} {fmt_num(a('amount'), 3)}</code>\n  <i>{a('description')}</i>\n"
+                    symbol = a('symbol')
+                    currency = a('currency')
+                    amount = float(a('amount') or 0.0)
+                    description = a('description')
+                    
+                    qty, rate, concept = parse_dividend_description(description, amount)
+                    dividends_data.append({
+                        "symbol": symbol,
+                        "qty": fmt_num(qty, 4) if qty is not None else "—",
+                        "rate": f"{currency} {fmt_num(rate, 4)}" if rate is not None else "—",
+                        "amount": f"{currency} {fmt_num(amount, 3)}",
+                        "concept": concept
+                    })
 
                 cls = 'red' if float(a('amount') or 0) < 0 else 'green'
                 html.append(f'<tr class="{"even" if i % 2 else "odd"}">')
@@ -167,7 +215,11 @@ class FlexReporter:
                 html.append('</tr>')
             html.append('</tbody></table>')
             if has_dividends:
-                telegram_msgs.append(dividend_msg)
+                telegram_msgs.append({
+                    "type": "dividends",
+                    "title": "💸 Dividends Received",
+                    "data": dividends_data
+                })
 
             # TransactionTaxes
             html.append('<h2>Transaction Taxes</h2>')

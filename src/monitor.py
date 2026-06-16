@@ -71,9 +71,17 @@ class Monitor:
                     else:
                         logger.warning(f"Failed to fetch positions: {r_pos.status_code}")
                         options = []
+                        await notify_admins(
+                            f"⚠️ <b>Delta Alert Check Failed:</b> API returned status code {r_pos.status_code}.",
+                            parse_mode="HTML"
+                        )
                 except Exception as e:
                     logger.error(f"Error fetching positions: {e}")
                     options = []
+                    await notify_admins(
+                        f"⚠️ <b>Delta Alert Check Failed:</b> Could not connect to API: {e}",
+                        parse_mode="HTML"
+                    )
 
                 # Build map: conId -> position data (including qty for
                 # short/long detection)
