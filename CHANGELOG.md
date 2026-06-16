@@ -1,3 +1,7 @@
+## v2026.06.16.2 (2026-06-16)
+
+- chore: parameterize Docker image names and enable building for ibkr-bot service (089b350)
+
 ## v2026.06.16.1 (2026-06-16)
 
 - chore: update project dependencies in requirements.txt (881934e)
