@@ -54,7 +54,7 @@ services:
 
   ibkr-api:
     build: .
-    image: ibkr-app:latest
+    image: ${PROJECT_NAME}-app:latest
     restart: always
     container_name: ${PROJECT_NAME}-api
     user: "${USER_ID}:${GROUP_ID}"
@@ -85,7 +85,8 @@ services:
       - "traefik.http.services.${PROJECT_NAME}-api.loadbalancer.server.port=8000"
 
   ibkr-bot:
-    image: ibkr-app:latest
+    build: .
+    image: ${PROJECT_NAME}-app:latest
     restart: always
     container_name: ${PROJECT_NAME}-bot
     user: "${USER_ID}:${GROUP_ID}"
