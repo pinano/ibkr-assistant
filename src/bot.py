@@ -1900,6 +1900,11 @@ async def scheduled_flex_report(
                         max_instances=1
                     )
                     logger.info(f"Rescheduled {report_type} Flex Report retry #{retry_count + 1} for {next_run}")
+                    await notify_admins(
+                        f"⚠️ <b>{report_type} Flex Query Failed:</b> {html}\n"
+                        f"It will be retried at {next_run.strftime('%Y-%m-%d %H:%M:%S')} (Retry #{retry_count + 1}/10).",
+                        parse_mode="HTML"
+                    )
                     return
                 else:
                     logger.error(f"{report_type} Flex Query failed after 10 retries: {html}")
@@ -2013,6 +2018,11 @@ async def scheduled_flex_report(
                     max_instances=1
                 )
                 logger.info(f"Rescheduled {report_type} Flex Report retry #{retry_count + 1} (due to error) for {next_run}")
+                await notify_admins(
+                    f"⚠️ <b>{report_type} Flex Query Error:</b> {e}\n"
+                    f"It will be retried at {next_run.strftime('%Y-%m-%d %H:%M:%S')} (Retry #{retry_count + 1}/10).",
+                    parse_mode="HTML"
+                )
             else:
                 await notify_admins(f"⚠️ {report_type} Flex Query System Error (Failed after 10 attempts): {e}")
         else:
