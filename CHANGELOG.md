@@ -1,3 +1,7 @@
+## v2026.06.17 (2026-06-17)
+
+- feat: add format_currency utility and update dividend reporting to use symbolic currency formatting and rounded quantities (0acd391)
+
 ## v2026.06.16.2 (2026-06-16)
 
 - chore: parameterize Docker image names and enable building for ibkr-bot service (089b350)
