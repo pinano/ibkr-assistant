@@ -31,6 +31,29 @@ def fmt_num(val, precision=2):
         return val
 
 
+def format_currency(currency_code: str, val: float, precision: int = 2) -> str:
+    if val is None:
+        return "—"
+    if not currency_code:
+        return fmt_num(val, precision)
+    symbols = {
+        "USD": "$",
+        "EUR": "€",
+        "GBP": "£",
+        "JPY": "¥",
+        "CAD": "C$",
+        "AUD": "A$",
+        "CHF": "CHF",
+        "SEK": "kr",
+    }
+    symbol = symbols.get(currency_code.upper(), currency_code)
+    formatted_val = fmt_num(val, precision)
+    if len(symbol) == 1 or symbol == "kr":
+        return f"{symbol}{formatted_val}"
+    else:
+        return f"{symbol} {formatted_val}"
+
+
 def parse_dividend_description(description: str, total_amount: float):
     # Match the rate and currency
     # e.g., "CASH DIVIDEND USD 1.452 PER SHARE"
@@ -198,11 +221,12 @@ class FlexReporter:
                     description = a('description')
                     
                     qty, rate, concept = parse_dividend_description(description, amount)
+                    qty_rounded = int(round(qty)) if qty is not None else None
                     dividends_data.append({
                         "symbol": symbol,
-                        "qty": fmt_num(qty, 4) if qty is not None else "—",
-                        "rate": f"{currency} {fmt_num(rate, 4)}" if rate is not None else "—",
-                        "amount": f"{currency} {fmt_num(amount, 3)}",
+                        "qty": fmt_num(qty_rounded, 0) if qty_rounded is not None else "—",
+                        "rate": format_currency(currency, rate, 4) if rate is not None else "—",
+                        "amount": format_currency(currency, amount, 2),
                         "concept": concept
                     })
 
