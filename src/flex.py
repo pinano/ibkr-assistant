@@ -9,6 +9,10 @@ from email.mime.text import MIMEText
 from ibflex import client as ibflex_client
 from src.config import settings
 
+# Monkey patch deprecated legacy endpoints in ibflex library
+ibflex_client.REQUEST_URL = 'https://ndcdyn.interactivebrokers.com/AccountManagement/FlexWebService/SendRequest'
+ibflex_client.STMT_URL = 'https://gdcdyn.interactivebrokers.com/AccountManagement/FlexWebService/GetStatement'
+
 
 def sortchildrenby(parent, attr_1, attr_2=None):
     if attr_2 is None:

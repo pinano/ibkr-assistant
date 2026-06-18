@@ -335,3 +335,68 @@ class TestParseDividendDescription:
         assert qty is None
         assert rate is None
         assert concept == "Some random text description without dividend keywords"
+
+
+# ---------------------------------------------------------------------------
+# format_currency tests
+# ---------------------------------------------------------------------------
+
+def fmt_num(val, precision=2):
+    try:
+        f = float(val)
+        # European format: comma as decimal separator
+        return ('{:.' + str(precision) + 'f}').format(round(f,
+                                                            precision)).replace('.', ',')
+    except (ValueError, TypeError):
+        return val
+
+
+def format_currency(currency_code: str, val: float, precision: int = 2) -> str:
+    if val is None:
+        return "—"
+    if not currency_code:
+        return fmt_num(val, precision)
+    symbols = {
+        "USD": "$",
+        "EUR": "€",
+        "GBP": "£",
+        "JPY": "¥",
+        "CAD": "C$",
+        "AUD": "A$",
+        "CHF": "CHF",
+        "SEK": "kr",
+    }
+    symbol = symbols.get(currency_code.upper(), currency_code)
+    formatted_val = fmt_num(val, precision)
+    if len(symbol) == 1 or symbol == "kr":
+        return f"{symbol}{formatted_val}"
+    else:
+        return f"{symbol} {formatted_val}"
+
+
+class TestFormatCurrency:
+    """Tests for format_currency — formats currencies with standard symbols."""
+
+    def test_usd_happy_path(self):
+        assert format_currency("USD", 22.0, 2) == "$22,00"
+        assert format_currency("USD", 1.452, 4) == "$1,4520"
+
+    def test_eur_happy_path(self):
+        assert format_currency("EUR", 25.62, 2) == "€25,62"
+        assert format_currency("EUR", 0.2705, 4) == "€0,2705"
+
+    def test_gbp_happy_path(self):
+        assert format_currency("GBP", 15.5, 2) == "£15,50"
+
+    def test_sek_happy_path(self):
+        assert format_currency("SEK", 100.0, 2) == "kr100,00"
+
+    def test_unknown_currency_code(self):
+        assert format_currency("NZD", 12.34, 2) == "NZD 12,34"
+        assert format_currency("CHF", 10.0, 2) == "CHF 10,00"
+
+    def test_none_value(self):
+        assert format_currency("USD", None) == "—"
+
+    def test_empty_currency(self):
+        assert format_currency("", 12.34, 2) == "12,34"
