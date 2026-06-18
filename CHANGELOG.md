@@ -1,3 +1,7 @@
+## v2026.06.18 (2026-06-18)
+
+- feat: add currency formatting utility and monkey patch legacy ibflex request endpoints (583636a)
+
 ## v2026.06.17 (2026-06-17)
 
 - feat: add format_currency utility and update dividend reporting to use symbolic currency formatting and rounded quantities (0acd391)
