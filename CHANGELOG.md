@@ -1,5 +1,6 @@
 ## v2026.09.02 (2026-09-02)
 
+- fix: add default TWOFA_TIMEOUT_ACTION to environment configuration template (f55a392)
 - docs: add host daily gateway restart script and crontab documentation (8799e6a)
 - chore: configure resource limits, log rotation, and dynamic gateway healthcheck (c8aa268)
 
