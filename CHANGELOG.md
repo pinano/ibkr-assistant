@@ -1,3 +1,8 @@
+## v2026.09.02 (2026-09-02)
+
+- docs: add host daily gateway restart script and crontab documentation (8799e6a)
+- chore: configure resource limits, log rotation, and dynamic gateway healthcheck (c8aa268)
+
 ## v2026.06.18 (2026-06-18)
 
 - feat: add currency formatting utility and monkey patch legacy ibflex request endpoints (583636a)
