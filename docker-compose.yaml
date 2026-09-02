@@ -4,6 +4,13 @@ services:
     image: gnzsnz/ib-gateway:stable
     restart: always
     container_name: ${PROJECT_NAME}-gateway
+    deploy:
+      resources:
+        reservations:
+          memory: 512M
+        limits:
+          cpus: '1.5'
+          memory: 1.5G
     environment:
       - TWS_USERID=${IB_USER}
       - TWS_PASSWORD=${IB_PASS}
@@ -19,11 +26,16 @@ services:
       - TZ=${TZ}
       - TIME_ZONE=${TZ}
     healthcheck:
-      test: [ "CMD-SHELL", "bash -c '< /dev/tcp/localhost/${IB_PORT}' || exit 1" ]
+      test: [ "CMD-SHELL", "bash -c 'PORT=$$([ \"$$TRADING_MODE\" = \"paper\" ] && echo 4002 || echo 4001); < /dev/tcp/localhost/$$PORT || exit 1'" ]
       interval: 15s
       timeout: 5s
       retries: 12
       start_period: 120s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
     networks:
       - ibkr
 
@@ -32,6 +44,13 @@ services:
     restart: always
     container_name: ${PROJECT_NAME}-db
     command: --default-time-zone=${TZ}
+    deploy:
+      resources:
+        reservations:
+          memory: 128M
+        limits:
+          cpus: '1.0'
+          memory: 512M
     environment:
       TZ: ${TZ}
       MARIADB_ROOT_PASSWORD: ${DB_ROOT_PASS}
@@ -49,6 +68,11 @@ services:
       timeout: 2s
       retries: 10
       start_period: 5s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
     networks:
       - ibkr
 
@@ -58,6 +82,13 @@ services:
     restart: always
     container_name: ${PROJECT_NAME}-api
     user: "${USER_ID}:${GROUP_ID}"
+    deploy:
+      resources:
+        reservations:
+          memory: 128M
+        limits:
+          cpus: '0.75'
+          memory: 512M
     environment:
       - TZ=${TZ}
       - PROJECT_NAME=${PROJECT_NAME}
@@ -83,6 +114,11 @@ services:
       - "traefik.enable=true"
       - "traefik.docker.network=traefik"
       - "traefik.http.services.${PROJECT_NAME}-api.loadbalancer.server.port=8000"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   ibkr-bot:
     build: .
@@ -91,6 +127,13 @@ services:
     container_name: ${PROJECT_NAME}-bot
     user: "${USER_ID}:${GROUP_ID}"
     command: python -m src.bot
+    deploy:
+      resources:
+        reservations:
+          memory: 128M
+        limits:
+          cpus: '0.75'
+          memory: 512M
     environment:
       - TZ=${TZ}
       - PROJECT_NAME=${PROJECT_NAME}
@@ -126,6 +169,11 @@ services:
         condition: service_started
       ibkr-gateway:
         condition: service_healthy
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
     networks:
       - ibkr
 
