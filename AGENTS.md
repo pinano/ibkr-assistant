@@ -42,6 +42,7 @@ The API exposes endpoints protected by `X-API-Key`. The bot communicates exclusi
   - Market closed: always serve from DB regardless of age.
   - `force_refresh=true` bypasses the cache.
 - **Concurrency**: Parallel calls to IBKR are rate-limited with `asyncio.Semaphore(3)` in the bot and `asyncio.Semaphore(5)` in the background refresh job.
+- **24h Session Token Handling & Gateway Restarts**: IBKR server resets invalidate session tokens every 24 hours. IBC in-memory soft restarts (`AUTO_RESTART_TIME`, `TWS_COLD_RESTART`) must remain disabled in `.env.dist`. Daily cold restarts are handled externally at the host/container level via `scripts/ibkr-gateway-restart.sh` (scheduled in host cron at 05:00 local time).
 
 ---
 

@@ -84,6 +84,26 @@ Configuration is managed in `.env` (generated from `.env.dist`). Key variables:
 | `DB_INSERT_INTERVAL` | `1800` | Seconds between periodic DB snapshots |
 | `TELEGRAM_ALLOWED_IDS` | — | Comma-separated authorized Telegram user IDs |
 
+### 4. Scheduled Daily Cold Restart (24h Token Handling)
+Interactive Brokers enforces a strict 24-hour security session token lifetime. When IBKR resets its servers, IBC's internal in-memory restart cannot handle the re-authentication dialog, which causes 503 errors and stale connections.
+
+To ensure 24/7 unattended reliability, a cold restart script is provided in `scripts/ibkr-gateway-restart.sh` and should be scheduled in the host crontab every morning at **05:00 local time** (prior to the scheduled 07:30 Flex queries and market open):
+
+```bash
+# Add daily cold restart job to host crontab
+crontab -e
+```
+
+```cron
+# Daily clean restart of IBKR gateways and downstream services
+00 05 * * * /path/to/scripts/ibkr-gateway-restart.sh
+```
+
+**How it works:**
+1. Restarts the `*-gateway` container(s), prompting IBC to submit fresh credentials on startup.
+2. Dynamically polls the internal API port (`4001` live / `4002` paper) until IBKR Gateway is fully authenticated and ready.
+3. Restarts downstream `*-api` and `*-bot` containers to refresh connection pools cleanly.
+
 ## 🕹 Operation
 
 ### Management Commands
