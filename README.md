@@ -175,6 +175,7 @@ Designed to fetch live/delayed-frozen market data, Greeks, and intrinsic/extrins
 | `min_strike` | `float` | `None` | Optional explicit lower strike boundary. |
 | `max_strike` | `float` | `None` | Optional explicit upper strike boundary. |
 | `right` | `string` | `"BOTH"` | `"BOTH"` (Calls and Puts grouped per row), `"C"` (Calls only), or `"P"` (Puts only). |
+| `trading_class` | `string` | `None` | Explicit trading class override (e.g. `"HMI"`). By default, auto-selects the primary, unadjusted contract series. |
 
 **Example Usage:**
 ```bash

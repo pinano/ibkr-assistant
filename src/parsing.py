@@ -236,3 +236,81 @@ def filter_strikes_window(
             filtered = filtered[:max_limit]
 
     return filtered
+
+
+def select_best_option_chain(
+    chains: list,
+    target_exchange: str = "DTB",
+    expiry: str = "",
+    trading_class: str = None,
+    underlying_symbol: str = "",
+):
+    """
+    Select the best / primary OptionChain definition from a list of chains
+    returned by IBKR reqSecDefOptParamsAsync.
+
+    Selection priority:
+    1. Filter by target_exchange (e.g. "DTB") and expiry. Fall back to any exchange with expiry if none match.
+    2. If trading_class is explicitly provided, match it exactly (case-insensitive).
+    3. Rank candidate chains by a multi-criteria heuristic:
+       - No numeric suffix in tradingClass (adjusted contracts append digits like HMI2, HMI4, AAPL1).
+       - Largest number of strikes (standard active contracts maintain the full strike grid).
+       - Largest number of total expirations.
+       - Exact match of tradingClass with underlying root ticker.
+    """
+    if not chains:
+        return None
+
+    def get_attr(obj, attr_name, default=None):
+        if isinstance(obj, dict):
+            return obj.get(attr_name, default)
+        return getattr(obj, attr_name, default)
+
+    clean_expiry = expiry.strip().replace("-", "") if expiry else ""
+    target_exch = (target_exchange or "").strip().upper()
+
+    # 1. Match target_exchange and expiry
+    candidates = [
+        c for c in chains
+        if (not target_exch or get_attr(c, 'exchange', '').upper() == target_exch)
+        and (not clean_expiry or clean_expiry in (get_attr(c, 'expirations') or []))
+    ]
+
+    # Fallback: any exchange with matching expiry
+    if not candidates and clean_expiry:
+        candidates = [
+            c for c in chains
+            if clean_expiry in (get_attr(c, 'expirations') or [])
+        ]
+
+    if not candidates:
+        return None
+
+    # 2. Filter by explicit trading_class if requested
+    if trading_class:
+        clean_tc = trading_class.strip().upper()
+        tc_matched = [
+            c for c in candidates
+            if get_attr(c, 'tradingClass', '').upper() == clean_tc
+        ]
+        if tc_matched:
+            return tc_matched[0]
+        return None
+
+    # 3. Smart ranking heuristic
+    def score_chain(c):
+        tc = get_attr(c, 'tradingClass', '')
+        # Unadjusted standard contracts typically have no digits (e.g. HMI vs HMI2)
+        no_digits = 1 if not any(ch.isdigit() for ch in tc) else 0
+        # Number of available strikes
+        strikes = get_attr(c, 'strikes') or []
+        strike_count = len(strikes)
+        # Number of available expirations
+        expirations = get_attr(c, 'expirations') or []
+        exp_count = len(expirations)
+        # Ticker match
+        sym_match = 1 if underlying_symbol and tc.upper() == underlying_symbol.upper() else 0
+        return (no_digits, strike_count, exp_count, sym_match)
+
+    candidates.sort(key=score_chain, reverse=True)
+    return candidates[0]

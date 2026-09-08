@@ -25,6 +25,7 @@ from src.parsing import (
     calc_option_extrinsic,
     calc_moneyness_pct,
     filter_strikes_window,
+    select_best_option_chain,
 )
 
 
@@ -538,5 +539,70 @@ class TestFilterStrikesWindow:
         raw = [2000.0, 1800.0, 2000.0, 1900.0, 1800.0]
         res = filter_strikes_window(raw, min_strike=1800.0, max_strike=2000.0)
         assert res == [1800.0, 1900.0, 2000.0]
+
+
+class TestSelectBestOptionChain:
+    """Tests for select_best_option_chain — smart trading class ranking."""
+
+    def test_prefers_unadjusted_hmi_over_hmi2(self):
+        # Raw list has HMI2 first (corporate action adjusted) and HMI second (standard)
+        chains = [
+            {
+                "exchange": "DTB",
+                "tradingClass": "HMI2",
+                "multiplier": "10",
+                "expirations": ["20261016"],
+                "strikes": [1400.0, 1500.0, 1600.0],
+            },
+            {
+                "exchange": "DTB",
+                "tradingClass": "HMI",
+                "multiplier": "10",
+                "expirations": ["20261016", "20261218"],
+                "strikes": [1200.0, 1300.0, 1400.0, 1500.0, 1600.0, 1700.0, 1800.0],
+            },
+        ]
+        # Should pick HMI automatically based on no-digits and richer strike count
+        best = select_best_option_chain(chains, target_exchange="DTB", expiry="20261016")
+        assert best["tradingClass"] == "HMI"
+
+    def test_explicit_trading_class_override(self):
+        chains = [
+            {"exchange": "DTB", "tradingClass": "HMI", "expirations": ["20261016"], "strikes": [1500.0]},
+            {"exchange": "DTB", "tradingClass": "HMI2", "expirations": ["20261016"], "strikes": [1500.0]},
+        ]
+        best = select_best_option_chain(chains, target_exchange="DTB", expiry="20261016", trading_class="HMI2")
+        assert best["tradingClass"] == "HMI2"
+
+    def test_case_insensitive_trading_class(self):
+        chains = [
+            {"exchange": "DTB", "tradingClass": "HMI", "expirations": ["20261016"], "strikes": [1500.0]},
+        ]
+        best = select_best_option_chain(chains, target_exchange="DTB", expiry="20261016", trading_class="hmi")
+        assert best["tradingClass"] == "HMI"
+
+    def test_prefers_richer_strike_grid_when_both_have_clean_names(self):
+        chains = [
+            {"exchange": "DTB", "tradingClass": "CLASS_A", "expirations": ["20261016"], "strikes": [100.0, 200.0]},
+            {"exchange": "DTB", "tradingClass": "CLASS_B", "expirations": ["20261016"], "strikes": [100.0, 150.0, 200.0, 250.0, 300.0]},
+        ]
+        best = select_best_option_chain(chains, target_exchange="DTB", expiry="20261016")
+        assert best["tradingClass"] == "CLASS_B"
+
+    def test_fallback_exchange_when_target_missing(self):
+        chains = [
+            {"exchange": "SMART", "tradingClass": "AAPL", "expirations": ["20261016"], "strikes": [200.0]},
+        ]
+        # Target DTB not found, but SMART has the expiry -> fallback to SMART
+        best = select_best_option_chain(chains, target_exchange="DTB", expiry="20261016")
+        assert best["exchange"] == "SMART"
+
+    def test_non_existent_expiry_returns_none(self):
+        chains = [
+            {"exchange": "DTB", "tradingClass": "HMI", "expirations": ["20261016"], "strikes": [1500.0]},
+        ]
+        best = select_best_option_chain(chains, target_exchange="DTB", expiry="20291231")
+        assert best is None
+
 
 

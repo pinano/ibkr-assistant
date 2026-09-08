@@ -27,6 +27,7 @@ from src.parsing import (
     calc_option_extrinsic,
     calc_moneyness_pct,
     filter_strikes_window,
+    select_best_option_chain,
 )
 from src.models import (
     OptionGreeks,
@@ -701,6 +702,7 @@ async def get_option_chain_quotes(
     strikes_count: Optional[int] = None,
     exchange: Optional[str] = "DTB",
     right: Optional[str] = "BOTH",
+    trading_class: Optional[str] = None,
     db: Session = Depends(get_db)
 ):
     """
@@ -787,21 +789,23 @@ async def get_option_chain_quotes(
     clean_expiry = expiry.strip().replace("-", "")
     target_exchange = (exchange or "DTB").strip().upper()
 
-    # Match target exchange and expiry
-    selected_chain = None
-    for chain in chains:
-        if chain.exchange.upper() == target_exchange and clean_expiry in chain.expirations:
-            selected_chain = chain
-            break
-
-    if not selected_chain:
-        for chain in chains:
-            if clean_expiry in chain.expirations:
-                selected_chain = chain
-                break
+    # Smart selection of the primary / most liquid trading class
+    selected_chain = select_best_option_chain(
+        chains,
+        target_exchange=target_exchange,
+        expiry=clean_expiry,
+        trading_class=trading_class,
+        underlying_symbol=ticker,
+    )
 
     if not selected_chain:
         all_expirations = sorted(list({exp for c in chains for exp in c.expirations}))
+        all_classes = sorted(list({c.tradingClass for c in chains}))
+        if trading_class:
+            raise HTTPException(
+                status_code=404,
+                detail=f"No option chain found matching trading_class='{trading_class}' for {symbol} on expiry {clean_expiry}. Available trading classes: {all_classes}"
+            )
         raise HTTPException(
             status_code=404,
             detail=f"Expiration {clean_expiry} not found for {symbol}. Available expirations: {all_expirations[:12]}"
