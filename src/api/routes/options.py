@@ -390,7 +390,7 @@ async def get_option_greeks(
         t_vol = getattr(t, 'volume', None)
         t_oi = getattr(t, 'openInterest', None)
         t_last = getattr(t, 'last', None)
-        t_time = getattr(t, 'lastTime', None)
+        t_time = getattr(t, 'time', None) or getattr(t, 'lastTime', None)
 
         def safe_float(val):
             """Return 0.0 if val is None or NaN."""
@@ -604,7 +604,7 @@ async def get_option_risk(symbol: str):
         t_vol = getattr(t, 'volume', None)
         t_oi = getattr(t, 'openInterest', None)
         t_last = getattr(t, 'last', None)
-        t_time = getattr(t, 'lastTime', None)
+        t_time = getattr(t, 'time', None) or getattr(t, 'lastTime', None)
 
         def safe_float(val):
             return val if (val is not None and not math.isnan(val)) else 0.0
@@ -931,8 +931,9 @@ async def get_option_chain_quotes(
         extrinsic = calc_option_extrinsic(effective_price, intrinsic)
 
         last_date_str = None
-        if t and t.lastTime:
-            last_date_str = t.lastTime.strftime("%Y-%m-%d %H:%M:%S")
+        t_time = getattr(t, 'time', None) or getattr(t, 'lastTime', None)
+        if t_time and hasattr(t_time, 'strftime'):
+            last_date_str = t_time.strftime("%Y-%m-%d %H:%M:%S")
 
         symbol_name = c.localSymbol or f"{underlying.symbol} {clean_expiry} {s} {r}"
 
