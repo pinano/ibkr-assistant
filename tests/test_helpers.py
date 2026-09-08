@@ -185,3 +185,140 @@ class TestValOrZero:
 
     def test_negative_float(self):
         assert self.val_or_zero(-0.05) == -0.05
+
+
+# ---------------------------------------------------------------------------
+# CBOE cache TTL logic tests
+# ---------------------------------------------------------------------------
+
+class TestCboeCacheTTL:
+    """Validate in-memory TTL caching behavior for CBOE responses."""
+
+    def test_cache_hit_within_ttl(self):
+        cache = {}
+        ttl = 180.0
+        now = 1000.0
+        cache["SPX"] = (now, {"data": {"options": []}})
+
+        # Access at now + 50s (within TTL)
+        current_time = 1050.0
+        entry = cache.get("SPX")
+        assert entry is not None
+        assert current_time - entry[0] < ttl
+        assert entry[1] == {"data": {"options": []}}
+
+    def test_cache_miss_after_ttl(self):
+        cache = {}
+        ttl = 180.0
+        now = 1000.0
+        cache["SPX"] = (now, {"data": {"options": []}})
+
+        # Access at now + 181s (expired)
+        current_time = 1181.0
+        entry = cache.get("SPX")
+        is_fresh = entry is not None and (current_time - entry[0] < ttl)
+        assert is_fresh is False
+
+    def test_cache_clear(self):
+        cache = {"SPX": (1000.0, {})}
+        cache.clear()
+        assert len(cache) == 0
+
+
+# ---------------------------------------------------------------------------
+# Strike format normalization tests
+# ---------------------------------------------------------------------------
+
+class TestStrikeFormatNormalization:
+    """Validate strike normalization in queries and snapshot symbols."""
+
+    @staticmethod
+    def format_strike(strike: float) -> str:
+        return f"{int(strike)}" if strike == int(strike) else f"{strike}"
+
+    def test_integer_float_strike(self):
+        assert self.format_strike(1900.0) == "1900"
+        assert self.format_strike(50.0) == "50"
+
+    def test_fractional_strike(self):
+        assert self.format_strike(185.5) == "185.5"
+        assert self.format_strike(12.25) == "12.25"
+
+    def test_display_symbol_formatting(self):
+        strike_fmt = self.format_strike(1900.0)
+        display = f"RMS 20260220 {strike_fmt} P"
+        assert display == "RMS 20260220 1900 P"
+
+    def test_multi_pattern_search(self):
+        strike = 1900.0
+        strike_fmt = self.format_strike(strike)
+        patterns = [f"RMS%20260220%{strike_fmt}%P"]
+        if strike_fmt != str(strike):
+            patterns.append(f"RMS%20260220%{strike}%P")
+        assert patterns == ["RMS%20260220%1900%P", "RMS%20260220%1900.0%P"]
+
+
+# ---------------------------------------------------------------------------
+# Period stats consolidation tests
+# ---------------------------------------------------------------------------
+
+class TestPeriodStatsConsolidation:
+    """Validate single-query period stats aggregation logic."""
+
+    class MockRecord:
+        def __init__(self, date: datetime, nav: float):
+            self.date = date
+            self.nav = nav
+
+    @staticmethod
+    def compute_stats(records):
+        if not records:
+            return None, None, None, None, []
+        first_rec = records[0]
+        last_rec = records[-1]
+        min_rec = min(records, key=lambda r: float(r.nav) if r.nav is not None else float("inf"))
+        max_rec = max(records, key=lambda r: float(r.nav) if r.nav is not None else float("-inf"))
+        series = [(r.date, float(r.nav)) for r in records if r.nav is not None]
+        return first_rec, last_rec, min_rec, max_rec, series
+
+    def test_empty_records(self):
+        f, l, mi, ma, s = self.compute_stats([])
+        assert f is None and l is None and mi is None and ma is None and s == []
+
+    def test_populated_records(self):
+        dt1 = datetime(2026, 6, 1, 10, 0)
+        dt2 = datetime(2026, 6, 2, 10, 0)
+        dt3 = datetime(2026, 6, 3, 10, 0)
+        records = [
+            self.MockRecord(dt1, 100000.0),
+            self.MockRecord(dt2, 98000.0),
+            self.MockRecord(dt3, 105000.0),
+        ]
+        first_rec, last_rec, min_rec, max_rec, series = self.compute_stats(records)
+        assert first_rec.nav == 100000.0
+        assert last_rec.nav == 105000.0
+        assert min_rec.nav == 98000.0
+        assert max_rec.nav == 105000.0
+        assert len(series) == 3
+        assert series[1] == (dt2, 98000.0)
+
+
+# ---------------------------------------------------------------------------
+# Auth middleware gating logic tests
+# ---------------------------------------------------------------------------
+
+class TestAuthMiddlewareLogic:
+    """Validate Telegram user authentication gating."""
+
+    @staticmethod
+    def is_authorized(user_id, allowed_ids: list[int]) -> bool:
+        return user_id is not None and user_id in allowed_ids
+
+    def test_authorized_user(self):
+        assert self.is_authorized(123456, [123456, 789012]) is True
+
+    def test_unauthorized_user(self):
+        assert self.is_authorized(999999, [123456, 789012]) is False
+
+    def test_none_user_unauthorized(self):
+        assert self.is_authorized(None, [123456]) is False

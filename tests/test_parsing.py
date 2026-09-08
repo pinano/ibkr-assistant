@@ -21,7 +21,12 @@ from src.parsing import (
     snap_is_valid,
     parse_osi_symbol,
     parse_european_symbol,
+    calc_option_intrinsic,
+    calc_option_extrinsic,
+    calc_moneyness_pct,
+    filter_strikes_window,
 )
+
 
 
 # ---------------------------------------------------------------------------
@@ -400,3 +405,138 @@ class TestFormatCurrency:
 
     def test_empty_currency(self):
         assert format_currency("", 12.34, 2) == "12,34"
+
+
+# ======================================================================
+# Option calculations & strike filtering tests
+# ======================================================================
+
+class TestCalcOptionIntrinsic:
+    """Tests for calc_option_intrinsic — Call and Put intrinsic math."""
+
+    def test_call_itm(self):
+        # Stock at 2000, Call strike 1900 -> intrinsic 100
+        assert calc_option_intrinsic("C", 1900.0, 2000.0) == 100.0
+        assert calc_option_intrinsic("CALL", 1900.0, 2000.0) == 100.0
+
+    def test_call_otm(self):
+        # Stock at 2000, Call strike 2100 -> intrinsic 0
+        assert calc_option_intrinsic("C", 2100.0, 2000.0) == 0.0
+
+    def test_call_atm(self):
+        assert calc_option_intrinsic("C", 2000.0, 2000.0) == 0.0
+
+    def test_put_itm(self):
+        # Stock at 2000, Put strike 2100 -> intrinsic 100
+        assert calc_option_intrinsic("P", 2100.0, 2000.0) == 100.0
+        assert calc_option_intrinsic("PUT", 2100.0, 2000.0) == 100.0
+
+    def test_put_otm(self):
+        # Stock at 2000, Put strike 1900 -> intrinsic 0
+        assert calc_option_intrinsic("P", 1900.0, 2000.0) == 0.0
+
+    def test_put_atm(self):
+        assert calc_option_intrinsic("P", 2000.0, 2000.0) == 0.0
+
+    def test_zero_underlying_returns_zero(self):
+        assert calc_option_intrinsic("C", 1900.0, 0.0) == 0.0
+        assert calc_option_intrinsic("P", 1900.0, 0.0) == 0.0
+
+    def test_zero_strike_returns_zero(self):
+        assert calc_option_intrinsic("C", 0.0, 2000.0) == 0.0
+        assert calc_option_intrinsic("P", 0.0, 2000.0) == 0.0
+
+
+class TestCalcOptionExtrinsic:
+    """Tests for calc_option_extrinsic — Time value math."""
+
+    def test_extrinsic_positive(self):
+        # Option market price 120.0, intrinsic 100.0 -> extrinsic 20.0
+        assert calc_option_extrinsic(120.0, 100.0) == 20.0
+
+    def test_extrinsic_when_price_below_intrinsic(self):
+        # Market price slightly below theoretical intrinsic due to spread -> capped at 0.0
+        assert calc_option_extrinsic(95.0, 100.0) == 0.0
+
+    def test_extrinsic_otm(self):
+        # Option market price 15.0, intrinsic 0.0 -> extrinsic 15.0
+        assert calc_option_extrinsic(15.0, 0.0) == 15.0
+
+    def test_zero_price_returns_zero(self):
+        assert calc_option_extrinsic(0.0, 10.0) == 0.0
+
+
+class TestCalcMoneynessPct:
+    """Tests for calc_moneyness_pct — percentage deviation from spot."""
+
+    def test_strike_above_spot(self):
+        # Strike 2100, spot 2000 -> +5.0%
+        assert calc_moneyness_pct(2100.0, 2000.0) == 5.0
+
+    def test_strike_below_spot(self):
+        # Strike 1900, spot 2000 -> -5.0%
+        assert calc_moneyness_pct(1900.0, 2000.0) == -5.0
+
+    def test_strike_at_spot(self):
+        assert calc_moneyness_pct(2000.0, 2000.0) == 0.0
+
+    def test_zero_spot_returns_zero(self):
+        assert calc_moneyness_pct(2000.0, 0.0) == 0.0
+
+
+class TestFilterStrikesWindow:
+    """Tests for filter_strikes_window — range and ATM window filtering."""
+
+    ALL_STRIKES = [1700.0, 1750.0, 1800.0, 1850.0, 1900.0, 1950.0, 2000.0, 2050.0, 2100.0, 2150.0, 2200.0, 2250.0]
+
+    def test_empty_strikes(self):
+        assert filter_strikes_window([]) == []
+
+    def test_default_strikes_below_and_above(self):
+        # Spot at 1980 -> closest strike is 2000. 5 below + ATM + 5 above = 11 strikes
+        res = filter_strikes_window(self.ALL_STRIKES, underlying_price=1980.0, strikes_below=5, strikes_above=5)
+        assert len(res) == 11
+        assert res == [1750.0, 1800.0, 1850.0, 1900.0, 1950.0, 2000.0, 2050.0, 2100.0, 2150.0, 2200.0, 2250.0]
+
+    def test_asymmetric_strikes_below_and_above(self):
+        # 3 below, 1 above -> [1850, 1900, 1950, 2000, 2050]
+        res = filter_strikes_window(self.ALL_STRIKES, underlying_price=2000.0, strikes_below=3, strikes_above=1)
+        assert res == [1850.0, 1900.0, 1950.0, 2000.0, 2050.0]
+
+    def test_explicit_min_and_max(self):
+        res = filter_strikes_window(self.ALL_STRIKES, min_strike=1850.0, max_strike=2050.0)
+        assert res == [1850.0, 1900.0, 1950.0, 2000.0, 2050.0]
+
+    def test_explicit_min_only(self):
+        res = filter_strikes_window(self.ALL_STRIKES, min_strike=2100.0)
+        assert res == [2100.0, 2150.0, 2200.0, 2250.0]
+
+    def test_explicit_max_only(self):
+        res = filter_strikes_window(self.ALL_STRIKES, max_strike=1800.0)
+        assert res == [1700.0, 1750.0, 1800.0]
+
+    def test_atm_near_bottom_boundary(self):
+        # Spot at 1650 -> below lowest strike (1700). 3 below + 3 above -> capped at start
+        res = filter_strikes_window(self.ALL_STRIKES, underlying_price=1650.0, strikes_below=3, strikes_above=3)
+        assert res == [1700.0, 1750.0, 1800.0, 1850.0]
+
+    def test_atm_near_top_boundary(self):
+        # Spot at 2300 -> above highest strike (2250). 3 below + 3 above -> capped at end
+        res = filter_strikes_window(self.ALL_STRIKES, underlying_price=2300.0, strikes_below=3, strikes_above=3)
+        assert res == [2100.0, 2150.0, 2200.0, 2250.0]
+
+    def test_excessive_range_centers_around_atm(self):
+        # Range with 50 strikes from 1000 to 1490. Spot at 1250. max_limit=20
+        large_strikes = [float(x) for x in range(1000, 1500, 10)]  # 50 strikes
+        res = filter_strikes_window(large_strikes, min_strike=1000.0, max_strike=1500.0, underlying_price=1250.0, max_limit=20)
+        assert len(res) == 20
+        # Check that 1250 is in the middle, not clipped to the first 20 starting at 1000
+        assert 1250.0 in res
+        assert min(res) > 1000.0  # Not starting from bottom
+
+    def test_unsorted_and_duplicate_input(self):
+        raw = [2000.0, 1800.0, 2000.0, 1900.0, 1800.0]
+        res = filter_strikes_window(raw, min_strike=1800.0, max_strike=2000.0)
+        assert res == [1800.0, 1900.0, 2000.0]
+
+

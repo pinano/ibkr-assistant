@@ -160,6 +160,87 @@ The `ibkr-api` service exposes the following endpoints (protected by `X-API-Key`
 | `GET` | `/contract/search` | Search contract details (params: `symbol`, `secType`) |
 | `GET` | `/market/snapshot/{symbol}` | Real-time price snapshot |
 | `GET` | `/options/chain/{symbol}` | Option expirations and strikes |
+| `GET` | `/options/chain/{symbol}/quotes` | Strike quotes with bid, ask, volume, open interest, greeks & intrinsic/extrinsic values (params: `expiry`, `min_strike`, `max_strike`, `strikes_below`, `strikes_above`, `exchange`, `right`) |
+
+#### Option Chain Quotes (`/options/chain/{symbol}/quotes`)
+Designed to fetch live/delayed-frozen market data, Greeks, and intrinsic/extrinsic metrics for a specific expiration. To prevent requesting too many market data subscriptions simultaneously from IBKR, strikes are centered around the current underlying spot price (ATM) by default.
+
+**Query Parameters:**
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `expiry` | `string` | *(required)* | Expiration date in `YYYYMMDD` or `YYYY-MM-DD` format (e.g. `20260320`). |
+| `exchange` | `string` | `"DTB"` | Options exchange (`"DTB"` for European EUREX, `"SMART"` for US). |
+| `strikes_below` | `int` | `5` | Number of strikes below the current spot price to fetch. |
+| `strikes_above` | `int` | `5` | Number of strikes above the current spot price to fetch. |
+| `min_strike` | `float` | `None` | Optional explicit lower strike boundary. |
+| `max_strike` | `float` | `None` | Optional explicit upper strike boundary. |
+| `right` | `string` | `"BOTH"` | `"BOTH"` (Calls and Puts grouped per row), `"C"` (Calls only), or `"P"` (Puts only). |
+
+**Example Usage:**
+```bash
+# 1. Discover available expirations for an asset
+curl -X GET "http://localhost:8000/options/chain/SAN.MC" \
+  -H "X-API-Key: your_api_key"
+
+# 2. Fetch option chain quotes for a specific expiration
+curl -X GET "http://localhost:8000/options/chain/SAN.MC/quotes?expiry=20260320&exchange=DTB&strikes_below=5&strikes_above=5" \
+  -H "X-API-Key: your_api_key"
+```
+
+<details>
+<summary>Sample JSON Response</summary>
+
+```json
+{
+  "symbol": "SAN.MC",
+  "underlying_con_id": 4181,
+  "underlying_price": 4.52,
+  "expiry": "20260320",
+  "exchange": "DTB",
+  "trading_class": "SAN",
+  "multiplier": 100.0,
+  "strikes_count": 11,
+  "rows": [
+    {
+      "strike": 4.5,
+      "moneyness_pct": -0.44,
+      "call": {
+        "con_id": 684210991,
+        "symbol": "C SAN  20260320 450 M",
+        "bid": 0.38,
+        "ask": 0.40,
+        "last": 0.39,
+        "volume": 120,
+        "open_interest": 1500,
+        "delta": 0.52,
+        "gamma": 0.45,
+        "theta": -0.008,
+        "vega": 0.035,
+        "iv": 0.245,
+        "intrinsic_value": 0.02,
+        "extrinsic_value": 0.37
+      },
+      "put": {
+        "con_id": 684210992,
+        "symbol": "P SAN  20260320 450 M",
+        "bid": 0.35,
+        "ask": 0.37,
+        "last": 0.36,
+        "volume": 85,
+        "open_interest": 2100,
+        "delta": -0.48,
+        "gamma": 0.45,
+        "theta": -0.007,
+        "vega": 0.035,
+        "iv": 0.242,
+        "intrinsic_value": 0.0,
+        "extrinsic_value": 0.36
+      }
+    }
+  ]
+}
+```
+</details>
 
 ## 🌍 International Stocks
 

@@ -1,4 +1,5 @@
 import logging
+import time
 import httpx
 from datetime import datetime
 try:
@@ -16,6 +17,13 @@ from src.config import settings
 
 logger = logging.getLogger("ibkr-api")
 
+_CBOE_CACHE = {}  # {cboe_ticker: (monotonic_ts, data)}
+_CBOE_CACHE_TTL = 180.0  # 3 minutes
+
+
+def _clear_cboe_cache():
+    """Clear the in-memory CBOE responses cache."""
+    _CBOE_CACHE.clear()
 
 
 async def _fetch_cboe_greeks(ticker: str, expiry: str, strike: float, right: str):
@@ -30,11 +38,18 @@ async def _fetch_cboe_greeks(ticker: str, expiry: str, strike: float, right: str
 
         url = f"https://cdn.cboe.com/api/global/delayed_quotes/options/{cboe_ticker}.json"
 
-        async with httpx.AsyncClient(timeout=5.0) as client:
-            r = await client.get(url)
-            if r.status_code != 200:
-                return None
-            data = r.json()
+        now_mono = time.monotonic()
+        cached = _CBOE_CACHE.get(cboe_ticker)
+        if cached and (now_mono - cached[0] < _CBOE_CACHE_TTL):
+            data = cached[1]
+        else:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                r = await client.get(url)
+                if r.status_code != 200:
+                    return None
+                data = r.json()
+            if data and 'data' in data and 'options' in data['data']:
+                _CBOE_CACHE[cboe_ticker] = (now_mono, data)
 
         if not data or 'data' not in data or 'options' not in data['data']:
             return None
@@ -65,8 +80,9 @@ async def _fetch_cboe_greeks(ticker: str, expiry: str, strike: float, right: str
                     return 0.0
             return float(val)
 
+        strike_fmt = f"{int(strike)}" if strike == int(strike) else f"{strike}"
         return OptionGreeks(
-            symbol=f"{ticker} {expiry} {strike} {right} (CBOE)",
+            symbol=f"{ticker} {expiry} {strike_fmt} {right} (CBOE)",
             delta=val_or_zero(option_data.get('delta')),
             gamma=val_or_zero(option_data.get('gamma')),
             vega=val_or_zero(option_data.get('vega')),

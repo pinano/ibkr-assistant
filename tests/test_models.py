@@ -101,6 +101,46 @@ class PositionItem(BaseModel):
     underlying: Optional[str] = None
 
 
+class OptionQuoteItem(BaseModel):
+    conId: int
+    symbol: str
+    right: str
+    strike: float
+    bid: float = 0.0
+    bid_size: int = 0
+    ask: float = 0.0
+    ask_size: int = 0
+    mid: float = 0.0
+    last_price: float = 0.0
+    volume: int = 0
+    open_interest: int = 0
+    implied_vol: float = 0.0
+    delta: float = 0.0
+    gamma: float = 0.0
+    theta: float = 0.0
+    vega: float = 0.0
+    intrinsic_value: float = 0.0
+    extrinsic_value: float = 0.0
+    last_date: Optional[str] = None
+
+
+class StrikeChainRow(BaseModel):
+    strike: float
+    moneyness_pct: float = 0.0
+    call: Optional[OptionQuoteItem] = None
+    put: Optional[OptionQuoteItem] = None
+
+
+class OptionChainQuotesResponse(BaseModel):
+    symbol: str
+    underlying_price: float = 0.0
+    expiry: str
+    exchange: str
+    trading_class: str
+    multiplier: str
+    strikes: List[StrikeChainRow]
+
+
 # ---------------------------------------------------------------------------
 # TradeItem tests
 # ---------------------------------------------------------------------------
@@ -409,6 +449,93 @@ class TestTradeDeduplication:
         f = self.FakeFill("e1", "AAPL", "2026-06-14T10:00:00", "BOT", 10, 185.0, 1)
         result = self._dedup([f])
         assert result[0]['commission'] is None
+
+
+# ---------------------------------------------------------------------------
+# OptionChainQuotesResponse tests
+# ---------------------------------------------------------------------------
+
+class TestOptionChainQuoteModels:
+    def test_option_quote_item_defaults(self):
+        item = OptionQuoteItem(conId=12345, symbol="P HMI  20260220 1900 M", right="P", strike=1900.0)
+        assert item.conId == 12345
+        assert item.symbol == "P HMI  20260220 1900 M"
+        assert item.right == "P"
+        assert item.strike == 1900.0
+        assert item.bid == 0.0
+        assert item.ask == 0.0
+        assert item.mid == 0.0
+        assert item.volume == 0
+        assert item.open_interest == 0
+        assert item.delta == 0.0
+        assert item.intrinsic_value == 0.0
+        assert item.extrinsic_value == 0.0
+        assert item.last_date is None
+
+    def test_option_quote_item_full(self):
+        item = OptionQuoteItem(
+            conId=999,
+            symbol="C HMI  20260320 2000 M",
+            right="C",
+            strike=2000.0,
+            bid=45.5,
+            bid_size=10,
+            ask=48.0,
+            ask_size=15,
+            mid=46.75,
+            last_price=47.0,
+            volume=120,
+            open_interest=540,
+            implied_vol=0.245,
+            delta=0.48,
+            gamma=0.003,
+            theta=-0.85,
+            vega=1.2,
+            intrinsic_value=10.0,
+            extrinsic_value=37.0,
+            last_date="2026-03-08 15:30:00"
+        )
+        assert item.bid == 45.5
+        assert item.ask == 48.0
+        assert item.mid == 46.75
+        assert item.volume == 120
+        assert item.open_interest == 540
+        assert item.delta == 0.48
+        assert item.last_date == "2026-03-08 15:30:00"
+
+    def test_strike_chain_row_partial(self):
+        row = StrikeChainRow(strike=1900.0, moneyness_pct=-2.5)
+        assert row.strike == 1900.0
+        assert row.moneyness_pct == -2.5
+        assert row.call is None
+        assert row.put is None
+
+    def test_strike_chain_row_with_call_and_put(self):
+        call_item = OptionQuoteItem(conId=1, symbol="C HMI 1900", right="C", strike=1900.0, bid=50.0, ask=52.0)
+        put_item = OptionQuoteItem(conId=2, symbol="P HMI 1900", right="P", strike=1900.0, bid=30.0, ask=32.0)
+        row = StrikeChainRow(strike=1900.0, moneyness_pct=0.0, call=call_item, put=put_item)
+        assert row.call.bid == 50.0
+        assert row.put.bid == 30.0
+
+    def test_option_chain_quotes_response(self):
+        call_item = OptionQuoteItem(conId=101, symbol="C HMI 1900", right="C", strike=1900.0, bid=50.0, ask=52.0)
+        row = StrikeChainRow(strike=1900.0, moneyness_pct=0.0, call=call_item, put=None)
+        resp = OptionChainQuotesResponse(
+            symbol="RMS",
+            underlying_price=1900.0,
+            expiry="20260320",
+            exchange="DTB",
+            trading_class="HMI",
+            multiplier="100",
+            strikes=[row]
+        )
+        assert resp.symbol == "RMS"
+        assert resp.underlying_price == 1900.0
+        assert resp.exchange == "DTB"
+        assert resp.trading_class == "HMI"
+        assert len(resp.strikes) == 1
+        assert resp.strikes[0].strike == 1900.0
+
 
 
 

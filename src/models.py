@@ -112,6 +112,46 @@ class MarketSnapshot(BaseModel):
     timestamp: Optional[datetime] = None
 
 
+class OptionQuoteItem(BaseModel):
+    conId: int
+    symbol: str
+    right: str
+    strike: float
+    bid: float = 0.0
+    bid_size: int = 0
+    ask: float = 0.0
+    ask_size: int = 0
+    mid: float = 0.0
+    last_price: float = 0.0
+    volume: int = 0
+    open_interest: int = 0
+    implied_vol: float = 0.0
+    delta: float = 0.0
+    gamma: float = 0.0
+    theta: float = 0.0
+    vega: float = 0.0
+    intrinsic_value: float = 0.0
+    extrinsic_value: float = 0.0
+    last_date: Optional[str] = None
+
+
+class StrikeChainRow(BaseModel):
+    strike: float
+    moneyness_pct: float = 0.0
+    call: Optional[OptionQuoteItem] = None
+    put: Optional[OptionQuoteItem] = None
+
+
+class OptionChainQuotesResponse(BaseModel):
+    symbol: str
+    underlying_price: float = 0.0
+    expiry: str
+    exchange: str
+    trading_class: str
+    multiplier: str
+    strikes: List[StrikeChainRow]
+
+
 # --- SQLAlchemy Models (Database) ---
 Base = declarative_base()
 
@@ -144,7 +184,7 @@ class OptionSnapshot(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     conId = Column(Integer, index=True)
     symbol = Column(String(100), unique=True)  # e.g. "RMS 260220 P 1860" — one row per option (UPSERT)
-    updated_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, index=True)
 
     # Market Data
     last_price = Column(Float)
@@ -166,4 +206,4 @@ class MarketCache(Base):
     price = Column(Float)
     bid = Column(Float)
     ask = Column(Float)
-    updated_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, index=True)

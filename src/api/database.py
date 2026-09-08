@@ -1,6 +1,7 @@
 # Database Setup - Robust resolution for Docker environments
 import os
 import logging
+from urllib.parse import quote_plus
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
@@ -16,7 +17,7 @@ if not db_url:
     db_pass = os.environ.get("DB_PASS")
     db_name = os.environ.get("DB_NAME", "ibkr")
     if db_user and db_pass:
-        db_url = f"mysql+pymysql://{db_user}:{db_pass}@{settings.PROJECT_NAME}-db/{db_name}"
+        db_url = f"mysql+pymysql://{quote_plus(db_user)}:{quote_plus(db_pass)}@{settings.PROJECT_NAME}-db/{quote_plus(db_name)}"
         logger.info("Constructed DB_URL from individual components")
 
 if not db_url:

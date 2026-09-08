@@ -57,10 +57,13 @@ async def get_summary():
 
     if account_id:
         try:
-            client.reqPnL(account_id)
-            await asyncio.sleep(0.5)
-        except AssertionError:
-            pass
+            wrapper = getattr(client, 'wrapper', None)
+            pnl_keys = getattr(wrapper, 'pnlKey2ReqId', None) if wrapper else None
+            if pnl_keys is None or (account_id, "") not in pnl_keys:
+                client.reqPnL(account_id)
+                await asyncio.sleep(0.5)
+        except (AssertionError, Exception) as e:
+            logger.debug(f"reqPnL subscription skipped or failed: {e}")
 
         try:
             pnl_result = client.pnl()

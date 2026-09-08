@@ -3,8 +3,9 @@ import math
 import logging
 from datetime import datetime, timedelta
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
-from typing import List
+from typing import List, Optional
 from ib_async import Option, Contract
 
 from src.api.auth import verify_key
@@ -19,10 +20,25 @@ from src.api.helpers import (
     _snap_is_valid,
     _is_market_open,
 )
-from src.parsing import parse_osi_symbol, parse_european_symbol
-from src.models import OptionGreeks, OptionSnapshot, OptionChainItem
+from src.parsing import (
+    parse_osi_symbol,
+    parse_european_symbol,
+    calc_option_intrinsic,
+    calc_option_extrinsic,
+    calc_moneyness_pct,
+    filter_strikes_window,
+)
+from src.models import (
+    OptionGreeks,
+    OptionSnapshot,
+    OptionChainItem,
+    OptionQuoteItem,
+    StrikeChainRow,
+    OptionChainQuotesResponse,
+)
 
 logger = logging.getLogger("ibkr-api")
+
 
 router = APIRouter()
 
@@ -68,7 +84,8 @@ async def get_option_greeks(
                 status_code=400,
                 detail=f"Invalid right: {right}. Must be P or C")
 
-        display_symbol = f"{underlying} {expiry} {strike} {right}"
+        strike_fmt = f"{int(strike)}" if strike == int(strike) else f"{strike}"
+        display_symbol = f"{underlying} {expiry} {strike_fmt} {right}"
 
         snap = None
 
@@ -76,9 +93,11 @@ async def get_option_greeks(
         expiry = expiry.replace("-", "")
 
         if not conId:
-            pattern = f"{underlying}%{expiry}%{strike}%{right}"
+            patterns = [f"{underlying}%{expiry}%{strike_fmt}%{right}"]
+            if strike_fmt != str(strike):
+                patterns.append(f"{underlying}%{expiry}%{strike}%{right}")
             snap = db.query(OptionSnapshot).filter(
-                OptionSnapshot.symbol.like(pattern)
+                or_(*[OptionSnapshot.symbol.like(p) for p in patterns])
             ).order_by(OptionSnapshot.updated_at.desc()).first()
             if snap:
                 conId = snap.conId
@@ -162,13 +181,18 @@ async def get_option_greeks(
                     logger.info(f"Fetched Greeks from CBOE for {underlying} {expiry} {strike} {right}")
 
                     try:
-                        db_symbol = f"{underlying} {expiry} {strike} {right}"
+                        db_symbol = display_symbol
                         snap = db.query(OptionSnapshot).filter(
-                            OptionSnapshot.symbol == db_symbol
+                            or_(
+                                OptionSnapshot.symbol == db_symbol,
+                                OptionSnapshot.symbol == f"{underlying} {expiry} {strike} {right}"
+                            )
                         ).first()
                         if snap is None:
                             snap = OptionSnapshot(symbol=db_symbol)
                             db.add(snap)
+                        else:
+                            snap.symbol = db_symbol
 
                         # Update conId if we now have a real one
                         if conId:
@@ -397,11 +421,16 @@ async def get_option_greeks(
         if should_save:
             cid = qualified[0].conId
             snap = db.query(OptionSnapshot).filter(
-                OptionSnapshot.symbol == display_symbol
+                or_(
+                    OptionSnapshot.symbol == display_symbol,
+                    OptionSnapshot.symbol == f"{underlying} {expiry} {strike} {right}"
+                )
             ).first()
             if snap is None:
                 snap = OptionSnapshot(symbol=display_symbol)
                 db.add(snap)
+            else:
+                snap.symbol = display_symbol
             snap.conId = cid  # Always update: may have been 0 from a prior CBOE save
 
             snap.updated_at = datetime.now()
@@ -657,3 +686,299 @@ async def get_option_chain(symbol: str):
         ))
 
     return items
+
+
+@router.get("/options/chain/{symbol}/quotes",
+             response_model=OptionChainQuotesResponse,
+             dependencies=[Depends(verify_key)])
+async def get_option_chain_quotes(
+    symbol: str,
+    expiry: str,
+    min_strike: Optional[float] = None,
+    max_strike: Optional[float] = None,
+    strikes_below: Optional[int] = 5,
+    strikes_above: Optional[int] = 5,
+    strikes_count: Optional[int] = None,
+    exchange: Optional[str] = "DTB",
+    right: Optional[str] = "BOTH",
+    db: Session = Depends(get_db)
+):
+    """
+    Get option chain quotes with live/delayed-frozen market data for a given expiration
+    and strike range. Specifically designed for European (EUREX/DTB) and US options.
+    Returns strike-by-strike bid, ask, volume, open interest, greeks, and intrinsic/extrinsic values.
+    """
+    client = await get_ib()
+
+    clean_symbol = symbol.strip()
+    prefix_exchange = None
+    prefix_currency = None
+
+    if ':' in clean_symbol:
+        parts = clean_symbol.split(':')
+        if len(parts) == 2:
+            prefix = parts[0].upper()
+            clean_symbol = parts[1]
+            if prefix in EXCHANGE_PREFIXES:
+                prefix_exchange, prefix_currency = EXCHANGE_PREFIXES[prefix]
+
+    ticker, parsed_exchange, currency = parse_symbol(clean_symbol)
+    stk_exchange = prefix_exchange or parsed_exchange
+    stk_currency = prefix_currency or currency
+
+    contract = Contract(
+        symbol=ticker,
+        secType="STK",
+        exchange=stk_exchange,
+        currency=stk_currency
+    )
+    qualified = await client.qualifyContractsAsync(contract)
+    if not qualified or not qualified[0]:
+        contract_smart = Contract(
+            symbol=ticker,
+            secType="STK",
+            exchange="SMART",
+            currency=stk_currency
+        )
+        qualified = await client.qualifyContractsAsync(contract_smart)
+
+    if not qualified or not qualified[0]:
+        raise HTTPException(status_code=404, detail=f"Underlying {symbol} not found")
+
+    underlying = qualified[0]
+
+    # Fetch underlying spot price for ATM calculations and moneyness
+    client.reqMarketDataType(4)
+    underlying_price = 0.0
+    try:
+        client.reqMktData(underlying, '', False, False)
+        for _ in range(15):
+            await asyncio.sleep(0.1)
+            t_und = client.ticker(underlying)
+            if t_und:
+                m_price = t_und.marketPrice()
+                if not math.isnan(m_price) and m_price > 0:
+                    underlying_price = m_price
+                    break
+                if t_und.last is not None and not math.isnan(t_und.last) and t_und.last > 0:
+                    underlying_price = t_und.last
+                    break
+                if t_und.close is not None and not math.isnan(t_und.close) and t_und.close > 0:
+                    underlying_price = t_und.close
+                    break
+        client.cancelMktData(underlying)
+    except Exception as e:
+        logger.debug(f"Could not fetch underlying spot price for {underlying.symbol}: {e}")
+
+    try:
+        chains = await client.reqSecDefOptParamsAsync(
+            underlying.symbol,
+            "",
+            underlying.secType,
+            underlying.conId
+        )
+    except Exception as e:
+        logger.error(f"Error fetching option chain definitions for {symbol}: {e}")
+        raise HTTPException(status_code=500, detail="Error fetching option chain parameters")
+
+    if not chains:
+        raise HTTPException(status_code=404, detail=f"No option chain found for {symbol}")
+
+    clean_expiry = expiry.strip().replace("-", "")
+    target_exchange = (exchange or "DTB").strip().upper()
+
+    # Match target exchange and expiry
+    selected_chain = None
+    for chain in chains:
+        if chain.exchange.upper() == target_exchange and clean_expiry in chain.expirations:
+            selected_chain = chain
+            break
+
+    if not selected_chain:
+        for chain in chains:
+            if clean_expiry in chain.expirations:
+                selected_chain = chain
+                break
+
+    if not selected_chain:
+        all_expirations = sorted(list({exp for c in chains for exp in c.expirations}))
+        raise HTTPException(
+            status_code=404,
+            detail=f"Expiration {clean_expiry} not found for {symbol}. Available expirations: {all_expirations[:12]}"
+        )
+
+    # Filter strikes: use strikes_below / strikes_above (or fallback to strikes_count)
+    if strikes_count is not None:
+        below = strikes_count // 2
+        above = strikes_count // 2
+    else:
+        below = strikes_below if strikes_below is not None else 5
+        above = strikes_above if strikes_above is not None else 5
+
+    filtered_strikes = filter_strikes_window(
+        selected_chain.strikes,
+        min_strike=min_strike,
+        max_strike=max_strike,
+        underlying_price=underlying_price,
+        strikes_below=below,
+        strikes_above=above,
+        max_limit=20
+    )
+
+    if not filtered_strikes:
+        raise HTTPException(status_code=404, detail="No strikes matched filter criteria")
+
+    target_right = (right or "BOTH").strip().upper()
+    fetch_call = target_right in ("BOTH", "C", "CALL")
+    fetch_put = target_right in ("BOTH", "P", "PUT")
+
+    # Build contracts
+    contracts_to_qualify = []
+    for s in filtered_strikes:
+        if fetch_call:
+            c = Option(
+                symbol=underlying.symbol,
+                lastTradeDateOrContractMonth=clean_expiry,
+                strike=s,
+                right="C",
+                exchange=selected_chain.exchange,
+                multiplier=selected_chain.multiplier,
+                currency=underlying.currency,
+                tradingClass=selected_chain.tradingClass
+            )
+            contracts_to_qualify.append(c)
+        if fetch_put:
+            p = Option(
+                symbol=underlying.symbol,
+                lastTradeDateOrContractMonth=clean_expiry,
+                strike=s,
+                right="P",
+                exchange=selected_chain.exchange,
+                multiplier=selected_chain.multiplier,
+                currency=underlying.currency,
+                tradingClass=selected_chain.tradingClass
+            )
+            contracts_to_qualify.append(p)
+
+    try:
+        qualified_options = await client.qualifyContractsAsync(*contracts_to_qualify)
+    except Exception as e:
+        logger.error(f"Error qualifying option contracts: {e}")
+        qualified_options = contracts_to_qualify
+
+    valid_contracts = [c for c in qualified_options if c and getattr(c, 'conId', 0)]
+
+    # Request market data with generic ticks: 100 (Volume), 101 (Open Interest), 106 (Greeks & IV)
+    for c in valid_contracts:
+        client.reqMktData(c, "100,101,106", False, False)
+
+    try:
+        # Give gateway time to stream quotes and greeks
+        for _ in range(25):
+            await asyncio.sleep(0.1)
+    finally:
+        for c in valid_contracts:
+            client.cancelMktData(c)
+
+    def safe_f(v):
+        return float(v) if (v is not None and not math.isnan(v)) else 0.0
+
+    def safe_i(v):
+        return int(v) if (v is not None and not math.isnan(v)) else 0
+
+    quotes_by_key = {}  # (strike, right) -> OptionQuoteItem
+
+    for c in valid_contracts:
+        t = client.ticker(c)
+        r = c.right.upper()
+        s = c.strike
+
+        bid = safe_f(t.bid) if t and t.bid != -1 else 0.0
+        bid_size = safe_i(t.bidSize) if t else 0
+        ask = safe_f(t.ask) if t and t.ask != -1 else 0.0
+        ask_size = safe_i(t.askSize) if t else 0
+        last = safe_f(t.last) if t and t.last != -1 and t.last > 0 else 0.0
+        mid = (bid + ask) * 0.5 if (bid > 0 and ask > 0) else (last or bid or ask or 0.0)
+
+        # Volume
+        vol = safe_i(getattr(t, 'volume', 0)) if t else 0
+        if vol == 0 and t:
+            vol = safe_i(getattr(t, 'callVolume' if r == 'C' else 'putVolume', 0))
+
+        # Open Interest (tickType 27 / 28)
+        oi = 0
+        if t:
+            if r == 'C':
+                oi = safe_i(getattr(t, 'callOpenInterest', 0))
+            else:
+                oi = safe_i(getattr(t, 'putOpenInterest', 0))
+            if oi == 0:
+                oi = safe_i(getattr(t, 'openInterest', 0))
+
+        # Greeks
+        g = t.modelGreeks or t.bidGreeks or t.askGreeks or t.lastGreeks if t else None
+        delta = safe_f(g.delta) if g else 0.0
+        gamma = safe_f(g.gamma) if g else 0.0
+        theta = safe_f(g.theta) if g else 0.0
+        vega = safe_f(g.vega) if g else 0.0
+        iv = safe_f(g.impliedVol) if g else 0.0
+
+        if underlying_price <= 0.0 and g and safe_f(g.undPrice) > 0.0:
+            underlying_price = safe_f(g.undPrice)
+
+        intrinsic = calc_option_intrinsic(r, s, underlying_price)
+        effective_price = last if last > 0 else mid
+        extrinsic = calc_option_extrinsic(effective_price, intrinsic)
+
+        last_date_str = None
+        if t and t.lastTime:
+            last_date_str = t.lastTime.strftime("%Y-%m-%d %H:%M:%S")
+
+        symbol_name = c.localSymbol or f"{underlying.symbol} {clean_expiry} {s} {r}"
+
+        quotes_by_key[(s, r)] = OptionQuoteItem(
+            conId=c.conId,
+            symbol=symbol_name,
+            right=r,
+            strike=s,
+            bid=bid,
+            bid_size=bid_size,
+            ask=ask,
+            ask_size=ask_size,
+            mid=round(mid, 4),
+            last_price=last,
+            volume=vol,
+            open_interest=oi,
+            implied_vol=round(iv, 4),
+            delta=round(delta, 4),
+            gamma=round(gamma, 4),
+            theta=round(theta, 4),
+            vega=round(vega, 4),
+            intrinsic_value=round(intrinsic, 2),
+            extrinsic_value=round(extrinsic, 2),
+            last_date=last_date_str
+        )
+
+    # Build strike rows
+    strike_rows = []
+    for s in filtered_strikes:
+        c_quote = quotes_by_key.get((s, "C"))
+        p_quote = quotes_by_key.get((s, "P"))
+        moneyness = calc_moneyness_pct(s, underlying_price)
+        strike_rows.append(StrikeChainRow(
+            strike=s,
+            moneyness_pct=moneyness,
+            call=c_quote,
+            put=p_quote
+        ))
+
+    return OptionChainQuotesResponse(
+        symbol=underlying.symbol,
+        underlying_price=round(underlying_price, 2),
+        expiry=clean_expiry,
+        exchange=selected_chain.exchange,
+        trading_class=selected_chain.tradingClass,
+        multiplier=selected_chain.multiplier,
+        strikes=strike_rows
+    )
+

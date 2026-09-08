@@ -36,7 +36,7 @@ The API exposes endpoints protected by `X-API-Key`. The bot communicates exclusi
 
 - **Bot → API only**: The Telegram bot must never talk directly to IBKR Gateway. All market data goes through the internal `ibkr-api` service (`http://{PROJECT_NAME}-api:8000`).
 - **API → Gateway**: The API talks to IBKR Gateway via `ib_async` on port `IB_PORT` (default 4003). The host is derived dynamically: `{PROJECT_NAME}-gateway`.
-- **No direct DB access from the API in bot calls**: The bot reads data via the API's REST endpoints, not by querying the DB directly (with the exception of the balance/NAV logic which uses SQLAlchemy models directly in `bot.py`).
+- **No direct DB access from the API in bot calls**: The bot reads data via the API's REST endpoints, not by querying the DB directly (with the exception of the balance/NAV logic which uses SQLAlchemy models directly in `src/bot/`).
 - **Caching strategy**: Greeks are cached in `option_snapshots` DB table.
   - Market open (Mon–Fri 09:00–23:00 local TZ): serve from DB if < 60 min old.
   - Market closed: always serve from DB regardless of age.
@@ -161,14 +161,14 @@ The test suite lives in `tests/` and is designed to run **without a live IBKR co
 
 | File | Tests | What is covered |
 |---|---|---|
-| `test_parsing.py` | 40 | `parse_symbol`, `parse_osi_symbol`, `parse_european_symbol`, `greeks_are_valid`, `snap_is_valid` |
-| `test_helpers.py` | 25 | `_is_market_open()` weekday/hour logic; CBOE option ID string construction; `val_or_zero()` coercion |
+| `test_parsing.py` | 77 | `parse_symbol`, `parse_osi_symbol`, `parse_european_symbol`, `greeks_are_valid`, `snap_is_valid`, `calc_option_intrinsic`, `calc_option_extrinsic`, `calc_moneyness_pct`, `filter_strikes_window` |
+| `test_helpers.py` | 37 | `_is_market_open()` weekday/hour logic; CBOE option ID string construction; `val_or_zero()` coercion; CBOE TTL cache; strike normalization; period stats aggregation; auth gating |
 | `test_account.py` | 22 | Exchange→prefix resolution for EUR/GBP/CHF options; `get_val()` tag/currency/BASE fallback logic |
 | `test_monitor.py` | 39 | Intrinsic/time-value math for puts and calls; expiry date formatting; delta alert filtering, throttling, and cache pruning |
 | `test_rich_helpers.py` | 50 | All Telegram Bot API 10.1 rich message block builders (`text_*`, `html_to_rich`, `cell`, `block_table`, `block_details`, `block_thinking`) |
-| `test_models.py` | 28 | Pydantic model validation for all API response types; trade `execId` deduplication; `localSymbol or symbol` fallback |
+| `test_models.py` | 36 | Pydantic model validation for all API response types including `OptionQuoteItem`, `StrikeChainRow`, `OptionChainQuotesResponse`; trade `execId` deduplication; `localSymbol or symbol` fallback |
 
-**Total: 204 tests.**
+**Total: 261 tests.**
 
 ### How to run (host / local development)
 
@@ -183,7 +183,7 @@ sed -i 's/include-system-site-packages = false/include-system-site-packages = tr
 Then run the tests:
 
 ```bash
-# Run the full suite (204 tests, ~0.2 s)
+# Run the full suite (249 tests, ~0.2 s)
 .venv/bin/pytest tests/
 
 # Run with verbose output
@@ -210,7 +210,7 @@ The following components involve live IBKR/DB/Telegram interactions and are outs
 ### Agent rules for testing
 
 **Before any code change:**
-1. Run `pytest tests/` and confirm all 204 tests pass. If any are failing before your change, document why before proceeding.
+1. Run `pytest tests/` and confirm all 249 tests pass. If any are failing before your change, document why before proceeding.
 
 **After any code change** touching these areas, **always re-run the suite** and confirm it is still green:
 
@@ -218,7 +218,7 @@ The following components involve live IBKR/DB/Telegram interactions and are outs
 - `src/api/helpers.py` (`_is_market_open`, `val_or_zero`, CBOE ID logic)
 - `src/api/routes/account.py` (prefix resolution, `get_val`)
 - `src/monitor.py` (alert filtering, intrinsic/TV math, date formatting)
-- `src/bot.py` (rich message helpers: `text_*`, `block_*`, `cell`, `html_to_rich`)
+- `src/bot/` (rich message helpers: `text_*`, `block_*`, `cell`, `html_to_rich`)
 - `src/models.py` (Pydantic model fields)
 - `src/api/routes/orders.py` (trade deduplication, symbol fallback)
 
@@ -227,10 +227,10 @@ The following components involve live IBKR/DB/Telegram interactions and are outs
 - Replicate any logic that depends on unavailable packages as an **inline pure function** in the test file — not imported from the production module.
 - Cover at least: the happy path, a boundary/edge condition, and one invalid/empty input.
 
-**Syntax verification** after editing `src/bot.py` or any API file:
+**Syntax verification** after editing `src/bot/` or any API file:
 
 ```bash
-.venv/bin/python -m py_compile src/bot.py src/api/routes/orders.py src/api/routes/options.py
+.venv/bin/python -m py_compile src/bot/*.py src/bot/routers/*.py src/api/routes/orders.py src/api/routes/options.py
 ```
 
 ---

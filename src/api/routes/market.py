@@ -112,7 +112,6 @@ async def get_market_snapshot(symbol: str, db: Session = Depends(get_db)):
         if v_last is None and v_bid is None and v_ask is None:
             for _ in range(30):  # up to 3 seconds
                 await asyncio.sleep(0.1)
-                client.sleep(0)  # process IB events
                 t = tickers[0]
                 v_bid = t.bid if (t.bid is not None and not math.isnan(t.bid) and t.bid > 0) else None
                 v_ask = t.ask if (t.ask is not None and not math.isnan(t.ask) and t.ask > 0) else None
