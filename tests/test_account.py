@@ -63,7 +63,7 @@ def build_underlying(symbol: str, exchange: str, currency: str) -> str:
     return symbol
 
 
-def get_val(tag: str, currency: str | None, account_values: list, default: str = "0") -> str:
+def get_val(tag: str, currency: str | None, account_values: list, default: str = "0", fallback_to_base: bool = True) -> str:
     """
     Mirror of the get_val() inner function inside get_summary().
     Searches account_values list for matching tag+currency.
@@ -76,12 +76,16 @@ def get_val(tag: str, currency: str | None, account_values: list, default: str =
         for m in matches:
             if m['currency'] == currency:
                 return m['value']
+        if not fallback_to_base:
+            return default
 
-    for m in matches:
-        if m['currency'] == 'BASE':
-            return m['value']
+    if fallback_to_base:
+        for m in matches:
+            if m['currency'] == 'BASE':
+                return m['value']
+        return matches[0]['value']
 
-    return matches[0]['value']
+    return default
 
 
 # ---------------------------------------------------------------------------
@@ -209,3 +213,17 @@ class TestGetVal:
         assert get_val('CashBalance', 'GBP', av) == '500'
         assert get_val('CashBalance', 'USD', av) == '2000'
         assert get_val('CashBalance', 'EUR', av) == '1000'
+
+    def test_missing_currency_fallback_false_returns_default(self):
+        """When querying a specific currency with fallback_to_base=False, missing currency returns default '0'."""
+        av = [
+            self._av('CashBalance', 'BASE', '9116.50'),
+            self._av('CashBalance', 'EUR', '727.77'),
+            self._av('CashBalance', 'USD', '8444.53'),
+            self._av('CashBalance', 'GBP', '968.38'),
+        ]
+        # CHF and SEK are missing: must return '0', NOT BASE 9116.50
+        assert get_val('CashBalance', 'CHF', av, fallback_to_base=False) == '0'
+        assert get_val('CashBalance', 'SEK', av, fallback_to_base=False) == '0'
+        assert get_val('CashBalance', 'EUR', av, fallback_to_base=False) == '727.77'
+

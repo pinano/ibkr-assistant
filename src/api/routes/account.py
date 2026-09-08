@@ -25,7 +25,7 @@ async def get_summary():
     client = await get_ib()
     v = client.accountValues()
 
-    def get_val(tag, currency=None, default="0"):
+    def get_val(tag, currency=None, default="0", fallback_to_base=True):
         matches = [x for x in v if x.tag == tag]
         if not matches:
             return default
@@ -34,12 +34,16 @@ async def get_summary():
             for m in matches:
                 if m.currency == currency:
                     return m.value
+            if not fallback_to_base:
+                return default
 
-        for m in matches:
-            if m.currency == 'BASE':
-                return m.value
+        if fallback_to_base:
+            for m in matches:
+                if m.currency == 'BASE':
+                    return m.value
+            return matches[0].value
 
-        return matches[0].value
+        return default
 
     net_liq_obj = next(
         (x for x in v if x.tag == 'NetLiquidation' and x.currency != 'BASE'),
@@ -110,11 +114,11 @@ async def get_summary():
         DailyPnL=daily_pnl,
         DailyRealizedPnL=daily_realized,
         StockMarketValue=float(get_val('StockMarketValue', 'BASE')),
-        EUR=float(get_val('CashBalance', 'EUR')),
-        USD=float(get_val('CashBalance', 'USD')),
-        GBP=float(get_val('CashBalance', 'GBP')),
-        CHF=float(get_val('CashBalance', 'CHF')),
-        SEK=float(get_val('CashBalance', 'SEK'))
+        EUR=float(get_val('CashBalance', 'EUR', fallback_to_base=False)),
+        USD=float(get_val('CashBalance', 'USD', fallback_to_base=False)),
+        GBP=float(get_val('CashBalance', 'GBP', fallback_to_base=False)),
+        CHF=float(get_val('CashBalance', 'CHF', fallback_to_base=False)),
+        SEK=float(get_val('CashBalance', 'SEK', fallback_to_base=False))
     )
 
 
