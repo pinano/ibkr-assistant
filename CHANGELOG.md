@@ -1,3 +1,12 @@
+## v2026.09.15 (2026-09-15)
+
+- feat: add market data status tracking, nullable option metrics, and Black-Scholes fallback (72a051b)
+- feat: implement smart option chain selection with trading class overrides and ranking heuristics (4d1cebe)
+- fix: update option timestamp retrieval to prefer time attribute over lastTime (153452f)
+- feat: add fallback_to_base parameter to get_val and disable automatic base currency fallback for account cash balances (38f174a)
+- feat: allow API key authentication via query parameters in addition to headers (88abd6e)
+- add option chain quotes endpoint, modularize bot package, and optimize performance (decc417)
+
 ## v2026.09.02 (2026-09-02)
 
 - fix: add default TWOFA_TIMEOUT_ACTION to environment configuration template (f55a392)
