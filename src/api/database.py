@@ -29,6 +29,27 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 # Auto-create tables if they don't exist
 Base.metadata.create_all(bind=engine)
 
+# Ensure new columns exist in option_snapshots table for existing DBs
+try:
+    from sqlalchemy import text
+    with engine.connect() as conn:
+        for col, col_type in [
+            ("bid", "FLOAT NULL"),
+            ("ask", "FLOAT NULL"),
+            ("bid_size", "INT NULL"),
+            ("ask_size", "INT NULL"),
+            ("market_data_status", "VARCHAR(20) NULL"),
+            ("quote_status", "VARCHAR(20) NULL"),
+            ("greeks_status", "VARCHAR(20) NULL"),
+        ]:
+            try:
+                conn.execute(text(f"ALTER TABLE option_snapshots ADD COLUMN IF NOT EXISTS {col} {col_type}"))
+                conn.commit()
+            except Exception:
+                pass
+except Exception as e:
+    logger.warning(f"Could not verify/migrate option_snapshots schema: {e}")
+
 
 def get_db():
     db = SessionLocal()

@@ -23,18 +23,19 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 # ---------------------------------------------------------------------------
 
 def compute_intrinsic_and_tv(right: str, strike: float,
-                               underlying_price: float, last_price: float):
+                             underlying_price: float, mid: float = None):
     """
     Mirror of the intrinsic/time-value block in check_alerts().
     Returns (intrinsic, time_value) or (None, None) if inputs missing.
+    time_value is computed strictly from mid (if available), floored at 0.0, and never from last_price.
     """
-    if not (last_price and last_price > 0 and underlying_price and underlying_price > 0 and strike):
+    if not (underlying_price and underlying_price > 0 and strike):
         return None, None
     if right.upper() == 'P':
         intrinsic = max(0.0, strike - underlying_price)
     else:  # Call
         intrinsic = max(0.0, underlying_price - strike)
-    time_value = last_price - intrinsic
+    time_value = max(0.0, mid - intrinsic) if mid is not None else None
     return intrinsic, time_value
 
 
@@ -71,8 +72,8 @@ def should_alert(qty: float, delta: float, threshold: float,
         return False
     if base_und in [x.upper() for x in exclude_list]:
         return False
-    # Skip near-zero delta (no data)
-    if abs(delta) < 0.0001:
+    # Skip near-zero or None delta (no data)
+    if delta is None or abs(delta) < 0.0001:
         return False
     # Skip below threshold
     if abs(delta) <= threshold:
@@ -89,55 +90,67 @@ class TestIntrinsicAndTimeValue:
 
     def test_itm_put(self):
         """Put with underlying < strike: intrinsic = strike - underlying."""
-        intrinsic, tv = compute_intrinsic_and_tv('P', 100.0, 90.0, 12.0)
+        intrinsic, tv = compute_intrinsic_and_tv('P', 100.0, 90.0, mid=12.0)
         assert intrinsic == pytest.approx(10.0)
         assert tv == pytest.approx(2.0)
 
     def test_otm_put(self):
-        """OTM put: intrinsic=0, TV=last_price."""
-        intrinsic, tv = compute_intrinsic_and_tv('P', 100.0, 110.0, 3.0)
+        """OTM put: intrinsic=0, TV=mid."""
+        intrinsic, tv = compute_intrinsic_and_tv('P', 100.0, 110.0, mid=3.0)
         assert intrinsic == pytest.approx(0.0)
         assert tv == pytest.approx(3.0)
 
     def test_itm_call(self):
         """Call with underlying > strike: intrinsic = underlying - strike."""
-        intrinsic, tv = compute_intrinsic_and_tv('C', 100.0, 115.0, 18.0)
+        intrinsic, tv = compute_intrinsic_and_tv('C', 100.0, 115.0, mid=18.0)
         assert intrinsic == pytest.approx(15.0)
         assert tv == pytest.approx(3.0)
 
     def test_otm_call(self):
-        """OTM call: intrinsic=0, TV=last_price."""
-        intrinsic, tv = compute_intrinsic_and_tv('C', 100.0, 90.0, 4.0)
+        """OTM call: intrinsic=0, TV=mid."""
+        intrinsic, tv = compute_intrinsic_and_tv('C', 100.0, 90.0, mid=4.0)
         assert intrinsic == pytest.approx(0.0)
         assert tv == pytest.approx(4.0)
 
     def test_atm_put(self):
         """ATM put: underlying == strike, intrinsic=0."""
-        intrinsic, tv = compute_intrinsic_and_tv('P', 100.0, 100.0, 5.0)
+        intrinsic, tv = compute_intrinsic_and_tv('P', 100.0, 100.0, mid=5.0)
         assert intrinsic == pytest.approx(0.0)
         assert tv == pytest.approx(5.0)
 
-    def test_missing_last_price(self):
-        intrinsic, tv = compute_intrinsic_and_tv('P', 100.0, 90.0, 0.0)
-        assert intrinsic is None
+    def test_missing_mid(self):
+        """When mid is missing, intrinsic is computed but TV is None (never uses last_price)."""
+        intrinsic, tv = compute_intrinsic_and_tv('P', 100.0, 90.0, mid=None)
+        assert intrinsic == pytest.approx(10.0)
         assert tv is None
 
     def test_missing_underlying(self):
-        intrinsic, tv = compute_intrinsic_and_tv('P', 100.0, 0.0, 10.0)
+        intrinsic, tv = compute_intrinsic_and_tv('P', 100.0, 0.0, mid=10.0)
         assert intrinsic is None
         assert tv is None
 
     def test_case_insensitive_right(self):
         """Right is case-insensitive."""
-        intrinsic_p, _ = compute_intrinsic_and_tv('p', 100.0, 90.0, 12.0)
-        intrinsic_P, _ = compute_intrinsic_and_tv('P', 100.0, 90.0, 12.0)
+        intrinsic_p, _ = compute_intrinsic_and_tv('p', 100.0, 90.0, mid=12.0)
+        intrinsic_P, _ = compute_intrinsic_and_tv('P', 100.0, 90.0, mid=12.0)
         assert intrinsic_p == intrinsic_P
 
-    def test_negative_time_value_deep_itm(self):
-        """Deep ITM: TV can be small or even slightly negative due to pricing."""
-        intrinsic, tv = compute_intrinsic_and_tv('P', 100.0, 50.0, 49.5)
+    def test_deep_itm_floored_at_zero(self):
+        """Deep ITM: when mid < intrinsic, TV is floored at 0.0 (never negative)."""
+        intrinsic, tv = compute_intrinsic_and_tv('P', 100.0, 50.0, mid=49.5)
         assert intrinsic == pytest.approx(50.0)
-        assert tv == pytest.approx(-0.5)
+        assert tv == 0.0
+
+    def test_rms_1580p_scenario(self):
+        """RMS 1580P scenario: spot 1420, strike 1580 -> intrinsic 160. Mid 151.75 -> TV floored at 0.0."""
+        intrinsic, tv = compute_intrinsic_and_tv('P', 1580.0, 1420.0, mid=151.75)
+        assert intrinsic == pytest.approx(160.0)
+        assert tv == 0.0
+
+        # When mid is missing, TV must be None, not calculated from old trade price
+        intrinsic_no_mid, tv_no_mid = compute_intrinsic_and_tv('P', 1580.0, 1420.0, mid=None)
+        assert intrinsic_no_mid == pytest.approx(160.0)
+        assert tv_no_mid is None
 
 
 # ---------------------------------------------------------------------------
@@ -214,6 +227,10 @@ class TestAlertFiltering:
     def test_near_zero_delta_not_alerted(self):
         """abs(delta) < 0.0001 is treated as no-data."""
         assert should_alert(-5, 0.00009, self.THRESHOLD, "AAPL", []) is False
+
+    def test_none_delta_not_alerted(self):
+        """delta is None when IBKR provides no greeks — should be skipped without error."""
+        assert should_alert(-5, None, self.THRESHOLD, "AAPL", []) is False
 
     def test_excluded_underlying_direct_match(self):
         assert should_alert(-5, -0.80, self.THRESHOLD, "BOX", ["BOX"]) is False

@@ -11,6 +11,14 @@ from src.parsing import (
     parse_symbol,
     greeks_are_valid as _greeks_are_valid,
     snap_is_valid as _snap_is_valid,
+    clean_price,
+    clean_size,
+    clean_greek,
+    calc_option_mid,
+    calc_option_intrinsic,
+    calc_option_extrinsic,
+    is_market_open_for_symbol,
+    determine_market_statuses,
 )
 from src.models import OptionGreeks
 from src.config import settings
@@ -81,18 +89,68 @@ async def _fetch_cboe_greeks(ticker: str, expiry: str, strike: float, right: str
             return float(val)
 
         strike_fmt = f"{int(strike)}" if strike == int(strike) else f"{strike}"
+
+        cboe_bid = clean_price(option_data.get('bid'))
+        cboe_bid_size = clean_size(option_data.get('bid_size')) if cboe_bid is not None else None
+        cboe_ask = clean_price(option_data.get('ask'))
+        cboe_ask_size = clean_size(option_data.get('ask_size')) if cboe_ask is not None else None
+        cboe_mid = calc_option_mid(cboe_bid, cboe_ask)
+
+        cboe_last = clean_price(option_data.get('last_trade_price'))
+        cboe_last_date = option_data.get('last_trade_time')
+
+        raw_und = data.get('data', {}).get('current_price')
+        cboe_und = clean_price(raw_und)
+
+        delta = clean_greek(option_data.get('delta'))
+        gamma = clean_greek(option_data.get('gamma'))
+        vega = clean_greek(option_data.get('vega'))
+        theta = clean_greek(option_data.get('theta'))
+        raw_iv = clean_greek(option_data.get('iv'))
+        iv = raw_iv if (raw_iv is not None and raw_iv > 0) else None
+
+        has_cboe_greeks = not (
+            (delta is None or delta == 0) and
+            (gamma is None or gamma == 0) and
+            (vega is None or vega == 0) and
+            (theta is None or theta == 0)
+        )
+        if not has_cboe_greeks:
+            delta = gamma = vega = theta = iv = None
+
+        intrinsic = round(calc_option_intrinsic(right, strike, cboe_und), 4) if (cboe_und and strike > 0) else None
+        extrinsic = round(max(cboe_mid - intrinsic, 0.0), 4) if (cboe_mid is not None and intrinsic is not None) else None
+
+        is_open = is_market_open_for_symbol(ticker, exchange="CBOE", currency="USD")
+        statuses = determine_market_statuses(
+            is_open=is_open,
+            has_bid_ask=(cboe_bid is not None or cboe_ask is not None),
+            has_greeks=(delta is not None or iv is not None),
+            source="cboe"
+        )
+
         return OptionGreeks(
             symbol=f"{ticker} {expiry} {strike_fmt} {right} (CBOE)",
-            delta=val_or_zero(option_data.get('delta')),
-            gamma=val_or_zero(option_data.get('gamma')),
-            vega=val_or_zero(option_data.get('vega')),
-            theta=val_or_zero(option_data.get('theta')),
-            implied_vol=val_or_zero(option_data.get('iv')),
-            underlying_price=val_or_zero(data.get('data', {}).get('current_price')),
-            last_price=val_or_zero(option_data.get('last_trade_price')),
+            delta=delta,
+            gamma=gamma,
+            vega=vega,
+            theta=theta,
+            implied_vol=iv,
+            underlying_price=cboe_und,
+            bid=cboe_bid,
+            bid_size=cboe_bid_size,
+            ask=cboe_ask,
+            ask_size=cboe_ask_size,
+            mid=cboe_mid,
+            intrinsic_value=intrinsic,
+            extrinsic_value=extrinsic,
+            last_price=cboe_last,
             volume=int(val_or_zero(option_data.get('volume'))),
             open_interest=int(val_or_zero(option_data.get('open_interest'))),
-            last_date=option_data.get('last_trade_time')
+            last_date=cboe_last_date,
+            market_data_status=statuses["market_data_status"],
+            quote_status=statuses["quote_status"],
+            greeks_status=statuses["greeks_status"]
         )
 
     except Exception as e:

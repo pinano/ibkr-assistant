@@ -8,6 +8,9 @@ All authoritative definitions for market constants live here.
 """
 
 import math
+from datetime import datetime, timezone, time
+from zoneinfo import ZoneInfo
+from typing import Optional, Any, Dict
 
 # ---------------------------------------------------------------------------
 # Market constants
@@ -148,14 +151,77 @@ def snap_is_valid(snap) -> bool:
 # Option chain calculations & strike filtering
 # ---------------------------------------------------------------------------
 
-def calc_option_intrinsic(right: str, strike: float, underlying_price: float) -> float:
+def clean_price(val: Any) -> Optional[float]:
+    """
+    Return float if val is a valid non-negative price, else None.
+    Negative numbers, None, NaN, and sentinel values like -1 return None.
+    Distinguishes a real price of 0.0 (returns 0.0) from missing data (returns None).
+    """
+    if val is None:
+        return None
+    try:
+        f = float(val)
+        if math.isnan(f) or f < 0:
+            return None
+        return f
+    except (ValueError, TypeError):
+        return None
+
+
+def clean_size(val: Any) -> Optional[int]:
+    """
+    Return int if val is a valid non-negative size, else None.
+    Negative numbers, None, NaN return None.
+    """
+    if val is None:
+        return None
+    try:
+        f = float(val)
+        if math.isnan(f) or f < 0:
+            return None
+        return int(f)
+    except (ValueError, TypeError):
+        return None
+
+
+def clean_greek(val: Any) -> Optional[float]:
+    """
+    Return float if val is a valid non-NaN Greek number, else None.
+    """
+    if val is None:
+        return None
+    try:
+        f = float(val)
+        if math.isnan(f):
+            return None
+        return f
+    except (ValueError, TypeError):
+        return None
+
+
+def calc_option_mid(bid: Optional[float], ask: Optional[float]) -> Optional[float]:
+    """
+    Calculate option mid price: (bid + ask) / 2.
+    Only calculated when BOTH bid and ask are valid numbers (not None, not NaN, and >= 0).
+    If either is missing or invalid, returns None.
+    """
+    if bid is None or ask is None:
+        return None
+    if math.isnan(bid) or math.isnan(ask):
+        return None
+    if bid < 0 or ask < 0:
+        return None
+    return round((bid + ask) * 0.5, 4)
+
+
+def calc_option_intrinsic(right: str, strike: float, underlying_price: float) -> Optional[float]:
     """
     Calculate option intrinsic value.
 
     For Call: max(0.0, underlying_price - strike)
     For Put:  max(0.0, strike - underlying_price)
     """
-    if underlying_price <= 0.0 or strike <= 0.0:
+    if underlying_price is None or strike is None or underlying_price <= 0.0 or strike <= 0.0:
         return 0.0
     r = right.upper().strip()
     if r in ('P', 'PUT'):
@@ -164,11 +230,14 @@ def calc_option_intrinsic(right: str, strike: float, underlying_price: float) ->
         return max(0.0, underlying_price - strike)
 
 
-def calc_option_extrinsic(price: float, intrinsic: float) -> float:
+def calc_option_extrinsic(price: Optional[float], intrinsic: Optional[float]) -> Optional[float]:
     """
     Calculate option extrinsic (time) value.
     extrinsic = max(0.0, price - intrinsic)
+    If price or intrinsic is None, returns None.
     """
+    if price is None or intrinsic is None:
+        return None
     if price <= 0.0:
         return 0.0
     return max(0.0, price - max(0.0, intrinsic))
@@ -314,3 +383,222 @@ def select_best_option_chain(
 
     candidates.sort(key=score_chain, reverse=True)
     return candidates[0]
+
+
+# ---------------------------------------------------------------------------
+# Black-Scholes Greeks Calculation
+# ---------------------------------------------------------------------------
+
+def calc_bs_greeks(
+    right: str,
+    underlying_price: float,
+    strike: float,
+    expiry: str,
+    implied_vol: float,
+    risk_free_rate: float = 0.035,
+    eval_date: str = None
+) -> dict:
+    """
+    Calculate Black-Scholes Option Greeks using the current underlying spot price
+    and implied volatility.
+
+    Parameters:
+        right: 'C' / 'CALL' or 'P' / 'PUT'
+        underlying_price: Current spot price of the underlying asset
+        strike: Strike price
+        expiry: Expiration date in YYYYMMDD format
+        implied_vol: Implied volatility (e.g. 0.32 for 32%)
+        risk_free_rate: Annualized risk-free interest rate (default 0.035 = 3.5%)
+        eval_date: Optional evaluation date in YYYYMMDD format (defaults to today)
+
+    Returns:
+        dict with keys: 'delta', 'gamma', 'theta', 'vega' (all rounded floats)
+    """
+    if underlying_price <= 0.0 or strike <= 0.0 or implied_vol <= 0.0:
+        return {"delta": 0.0, "gamma": 0.0, "theta": 0.0, "vega": 0.0}
+
+    try:
+        clean_exp = expiry.replace("-", "").strip()
+        exp_dt = datetime.strptime(clean_exp, "%Y%m%d")
+        if eval_date:
+            now_dt = datetime.strptime(eval_date.replace("-", "").strip(), "%Y%m%d")
+        else:
+            now_dt = datetime.now()
+        days_to_expiry = max((exp_dt.date() - now_dt.date()).days, 0)
+        # Avoid division by zero on expiry date: minimum 1 day fraction
+        T = max(days_to_expiry / 365.0, 1.0 / 365.0)
+    except Exception:
+        return {"delta": 0.0, "gamma": 0.0, "theta": 0.0, "vega": 0.0}
+
+    sigma = implied_vol
+    r = risk_free_rate
+    S = underlying_price
+    K = strike
+
+    d1 = (math.log(S / K) + (r + 0.5 * sigma * sigma) * T) / (sigma * math.sqrt(T))
+    d2 = d1 - sigma * math.sqrt(T)
+
+    def _norm_cdf(x):
+        return 0.5 * (1.0 + math.erf(x / math.sqrt(2.0)))
+
+    def _norm_pdf(x):
+        return math.exp(-0.5 * x * x) / math.sqrt(2.0 * math.pi)
+
+    is_call = right.upper().strip() in ("C", "CALL")
+
+    if is_call:
+        delta = _norm_cdf(d1)
+        theta = (- (S * _norm_pdf(d1) * sigma) / (2.0 * math.sqrt(T)) - r * K * math.exp(-r * T) * _norm_cdf(d2)) / 365.0
+    else:
+        delta = _norm_cdf(d1) - 1.0
+        theta = (- (S * _norm_pdf(d1) * sigma) / (2.0 * math.sqrt(T)) + r * K * math.exp(-r * T) * _norm_cdf(-d2)) / 365.0
+
+    gamma = _norm_pdf(d1) / (S * sigma * math.sqrt(T))
+    vega = (S * _norm_pdf(d1) * math.sqrt(T)) / 100.0
+
+    return {
+        "delta": round(delta, 4),
+        "gamma": round(gamma, 4),
+        "theta": round(theta, 4),
+        "vega": round(vega, 4)
+    }
+
+
+def is_market_open_for_symbol(
+    symbol: Optional[str] = None,
+    exchange: Optional[str] = None,
+    currency: Optional[str] = None,
+    ref_dt: Optional[datetime] = None,
+) -> bool:
+    """
+    Check if the regular trading market session is currently open for a given instrument.
+
+    Market session definitions:
+    - US markets (USD, SMART, CBOE, AMEX, NASDAQ, NYSE, ISLAND): Mon-Fri 09:30-16:00 US/Eastern
+    - UK markets (GBP, LSE, .L): Mon-Fri 08:00-16:30 Europe/London
+    - EU markets (EUR, CHF, EUREX, DTB, SBF, EURONEXT, .PA, .AS, .MC, etc.): Mon-Fri 09:00-17:30 Europe/Paris
+    """
+    if ref_dt is None:
+        ref_dt = datetime.now(timezone.utc)
+    elif ref_dt.tzinfo is None:
+        ref_dt = ref_dt.replace(tzinfo=timezone.utc)
+
+    sym_upper = (symbol or "").upper().strip()
+    exch_upper = (exchange or "").upper().strip()
+    curr_upper = (currency or "").upper().strip()
+
+    first_token = sym_upper.split()[0] if sym_upper else ""
+    first_token_clean = first_token.split('.')[0] if '.' in first_token else first_token
+
+    eu_tickers = {
+        'RMS', 'MC', 'OR', 'SAN', 'BBVA', 'ITX', 'AIR', 'ASML', 'BNP', 'SU', 'DG',
+        'GLE', 'CS', 'SAP', 'SIE', 'ALV', 'BAYN', 'BMW', 'MBG', 'VOW3', 'OESX', 'ESTX50'
+    }
+    uk_tickers = {
+        'BATS', 'RIO', 'ULVR', 'NG', 'SHEL', 'AZN', 'GSK', 'BP', 'HSBA'
+    }
+
+    is_uk = (
+        curr_upper == "GBP"
+        or exch_upper in ("LSE", "LSEETF")
+        or sym_upper.endswith(".L")
+        or first_token_clean in uk_tickers
+    )
+    is_eu = (
+        curr_upper in ("EUR", "CHF")
+        or exch_upper in ("EUREX", "DTB", "SBF", "EURONEXT", "BVME", "MEFF", "AEB", "SWX", "VIRTX", "SOFFEX")
+        or any(sym_upper.endswith(sfx) for sfx in (".PA", ".AS", ".BR", ".MC", ".DE", ".MI", ".VI", ".SW"))
+        or sym_upper.startswith(("P HMI", "C HMI", "P OESX", "C OESX"))
+        or first_token_clean in eu_tickers
+    )
+    is_us = (
+        curr_upper == "USD"
+        or exch_upper in ("SMART", "CBOE", "AMEX", "NASDAQ", "NYSE", "ISLAND", "BATS", "BOX", "MIAX", "PHLX", "ISE", "EDGX")
+    )
+
+    if is_uk:
+        dt = ref_dt.astimezone(ZoneInfo("Europe/London"))
+        return dt.weekday() < 5 and (time(8, 0) <= dt.time() < time(16, 30))
+    elif is_eu and not is_us:
+        dt = ref_dt.astimezone(ZoneInfo("Europe/Paris"))
+        return dt.weekday() < 5 and (time(9, 0) <= dt.time() < time(17, 30))
+    else:
+        # Default to US market hours
+        dt = ref_dt.astimezone(ZoneInfo("America/New_York"))
+        return dt.weekday() < 5 and (time(9, 30) <= dt.time() < time(16, 0))
+
+
+def determine_market_statuses(
+    is_open: bool,
+    has_bid_ask: bool,
+    has_greeks: bool,
+    market_data_type: Optional[int] = 1,
+    source: str = "ibkr",
+    greeks_are_frozen: bool = False,
+) -> Dict[str, str]:
+    """
+    Determine market_data_status, quote_status, and greeks_status.
+
+    Possible return values:
+      market_data_status: "LIVE", "FROZEN", "CLOSED", "DELAYED"
+      quote_status: "LIVE", "FROZEN", "CLOSED", "DELAYED", "UNAVAILABLE"
+      greeks_status: "LIVE", "FROZEN", "CLOSED", "DELAYED", "UNAVAILABLE"
+    """
+    if source == "db":
+        if not is_open:
+            return {
+                "market_data_status": "CLOSED",
+                "quote_status": "FROZEN" if has_bid_ask else "CLOSED",
+                "greeks_status": "FROZEN" if has_greeks else "CLOSED",
+            }
+        else:
+            return {
+                "market_data_status": "FROZEN",
+                "quote_status": "FROZEN" if has_bid_ask else "UNAVAILABLE",
+                "greeks_status": "FROZEN" if has_greeks else "UNAVAILABLE",
+            }
+
+    if source == "cboe":
+        if is_open:
+            return {
+                "market_data_status": "DELAYED",
+                "quote_status": "DELAYED" if has_bid_ask else "UNAVAILABLE",
+                "greeks_status": "FROZEN" if has_greeks else "UNAVAILABLE",
+            }
+        else:
+            return {
+                "market_data_status": "CLOSED",
+                "quote_status": "FROZEN" if has_bid_ask else "CLOSED",
+                "greeks_status": "FROZEN" if has_greeks else "CLOSED",
+            }
+
+    # source == "ibkr"
+    if not is_open:
+        mkt_status = "FROZEN" if market_data_type in (2, 4) else "CLOSED"
+        q_status = "FROZEN" if has_bid_ask else "CLOSED"
+        g_status = "FROZEN" if has_greeks else "CLOSED"
+        return {
+            "market_data_status": mkt_status,
+            "quote_status": q_status,
+            "greeks_status": g_status,
+        }
+    else:
+        # Market is open
+        if market_data_type == 3:
+            mkt_status = "DELAYED"
+            q_status = "DELAYED" if has_bid_ask else "UNAVAILABLE"
+            g_status = "DELAYED" if has_greeks else "UNAVAILABLE"
+        elif market_data_type in (2, 4):
+            mkt_status = "FROZEN"
+            q_status = "FROZEN" if has_bid_ask else "UNAVAILABLE"
+            g_status = "FROZEN" if has_greeks else "UNAVAILABLE"
+        else:
+            mkt_status = "LIVE"
+            q_status = "LIVE" if has_bid_ask else "UNAVAILABLE"
+            g_status = "FROZEN" if greeks_are_frozen else ("LIVE" if has_greeks else "UNAVAILABLE")
+
+        return {
+            "market_data_status": mkt_status,
+            "quote_status": q_status,
+            "greeks_status": g_status,
+        }

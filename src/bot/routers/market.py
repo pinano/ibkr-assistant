@@ -399,33 +399,65 @@ async def process_opt_details(callback: types.CallbackQuery):
             exp_fmt = f"{expiry[0:4]}-{expiry[4:6]}-{expiry[6:8]}" if len(expiry) == 8 else expiry
             display = f"{underlying} {right} {strike_fmt} {exp_fmt}"
 
+            delta_val = f"{d['delta']:.4f}" if d.get('delta') is not None else "N/A"
+            gamma_val = f"{d['gamma']:.4f}" if d.get('gamma') is not None else "N/A"
+            vega_val = f"{d['vega']:.4f}" if d.get('vega') is not None else "N/A"
+            theta_val = f"{d['theta']:.4f}" if d.get('theta') is not None else "N/A"
+
+            g_status = d.get('greeks_status') or "N/A"
             greeks_table = block_table([
                 [cell("Metric", is_header=True), cell("Value", is_header=True, align="right")],
-                [cell("Delta Δ"), cell(f"{d['delta']:.4f}", align="right")],
-                [cell("Gamma γ"), cell(f"{d['gamma']:.4f}", align="right")],
-                [cell("Vega ν"), cell(f"{d['vega']:.4f}", align="right")],
-                [cell("Theta θ"), cell(f"{d['theta']:.4f}", align="right")]
+                [cell("Status"), cell(g_status, align="right")],
+                [cell("Delta Δ"), cell(delta_val, align="right")],
+                [cell("Gamma γ"), cell(gamma_val, align="right")],
+                [cell("Vega ν"), cell(vega_val, align="right")],
+                [cell("Theta θ"), cell(theta_val, align="right")]
             ], is_bordered=True, is_striped=True)
 
+            bid_val = f"{d['bid']:.2f}" if d.get('bid') is not None else "N/A"
+            ask_val = f"{d['ask']:.2f}" if d.get('ask') is not None else "N/A"
+            mid_val = f"{d['mid']:.2f}" if d.get('mid') is not None else "N/A"
+            iv_val = f"{d['implied_vol'] * 100:.2f}%" if d.get('implied_vol') is not None else "N/A"
+            und_val = f"{d['underlying_price']:.2f}" if d.get('underlying_price') is not None else "N/A"
+            intr_val = f"{d['intrinsic_value']:.2f}" if d.get('intrinsic_value') is not None else "N/A"
+            extr_val = f"{d['extrinsic_value']:.2f}" if d.get('extrinsic_value') is not None else "N/A"
+
+            q_status = d.get('quote_status') or "N/A"
+            quote_table = block_table([
+                [cell("Metric", is_header=True), cell("Value", is_header=True, align="right")],
+                [cell("Status"), cell(q_status, align="right")],
+                [cell("Bid"), cell(bid_val, align="right")],
+                [cell("Ask"), cell(ask_val, align="right")],
+                [cell("Mid"), cell(mid_val, align="right")],
+                [cell("Intrinsic"), cell(intr_val, align="right")],
+                [cell("Extrinsic"), cell(extr_val, align="right")],
+            ], is_bordered=True, is_striped=True)
+
+            m_status = d.get('market_data_status') or "N/A"
             mkt_table = block_table([
                 [cell("Metric", is_header=True), cell("Value", is_header=True, align="right")],
-                [cell("Implied Vol (IV)"), cell(f"{d['implied_vol'] * 100:.2f}%", align="right")],
-                [cell("Underlying Price"), cell(f"{d['underlying_price']:.2f}", align="right")],
-                [cell("Volume"), cell(str(d['volume']), align="right")],
-                [cell("Open Interest"), cell(str(d['open_interest']), align="right")]
+                [cell("Market Status"), cell(m_status, align="right")],
+                [cell("Implied Vol (IV)"), cell(iv_val, align="right")],
+                [cell("Underlying Price"), cell(und_val, align="right")],
+                [cell("Volume"), cell(str(d.get('volume', 0)), align="right")],
+                [cell("Open Interest"), cell(str(d.get('open_interest', 0)), align="right")]
             ], is_bordered=True, is_striped=True)
+
+            last_p_val = f"{d['last_price']:.2f}" if d.get('last_price') is not None else "N/A"
+            last_d_val = str(d.get('last_date') or 'N/A')
 
             last_trade_table = block_table([
                 [cell("Metric", is_header=True), cell("Value", is_header=True, align="right")],
-                [cell("Last Price"), cell(f"{d['last_price']:.2f}", align="right")],
-                [cell("Date"), cell(str(d['last_date'] or 'N/A'), align="right")]
+                [cell("Last Price"), cell(last_p_val, align="right")],
+                [cell("Date"), cell(last_d_val, align="right")]
             ], is_bordered=True, is_striped=True)
 
             blocks = [
                 block_heading(f"📊 Option Details: {display}"),
-                block_details("🧮 Greeks", [greeks_table], is_open=True),
+                block_details("💰 Market Quote", [quote_table], is_open=True),
+                block_details("🧮 Greeks", [greeks_table]),
                 block_details("📈 Market Data", [mkt_table]),
-                block_details("💰 Last Trade", [last_trade_table])
+                block_details("🕰️ Last Trade", [last_trade_table])
             ]
 
             await send_rich_message(callback.message.chat.id, blocks)
@@ -523,12 +555,13 @@ async def cmd_delta(m: types.Message):
                         )
                         if r.status_code == 200:
                             data = r.json()
-                            raw_delta = data.get('delta', 0.0)
-                            if abs(raw_delta) >= 0.0001:
+                            raw_delta = data.get('delta')
+                            if raw_delta is not None and abs(raw_delta) >= 0.0001:
                                 delta = raw_delta
 
-                            raw_last = data.get('last_price', 0.0)
-                            raw_und = data.get('underlying_price', 0.0)
+                            raw_last = data.get('last_price')
+                            raw_und = data.get('underlying_price')
+                            raw_mid = data.get('mid')
                             if raw_last and raw_last > 0:
                                 last_price = raw_last
                             if raw_und and raw_und > 0:
@@ -548,13 +581,15 @@ async def cmd_delta(m: types.Message):
                 # Compute intrinsic value and time value
                 intrinsic = None
                 time_value = None
-                if last_price is not None and underlying_price is not None and strike:
+                if underlying_price is not None and strike:
                     right_upper = right.upper()
                     if right_upper == 'P':
                         intrinsic = max(0.0, strike - underlying_price)
                     else:  # Call
                         intrinsic = max(0.0, underlying_price - strike)
-                    time_value = last_price - intrinsic
+                    # Rule 6: Use mid for extrinsic / time value. Do not use last_price if mid is missing.
+                    if raw_mid is not None:
+                        time_value = max(0.0, raw_mid - intrinsic)
 
                 display_und = (underlying.split(':')[-1] if ':' in underlying else underlying)[:5]
                 return {

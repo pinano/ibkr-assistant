@@ -57,18 +57,27 @@ class OptionChainItem(BaseModel):
 
 
 class OptionGreeks(BaseModel):
-
     symbol: str
-    delta: float = 0.0
-    gamma: float = 0.0
-    vega: float = 0.0
-    theta: float = 0.0
-    implied_vol: float = 0.0
-    underlying_price: float = 0.0
+    delta: Optional[float] = None
+    gamma: Optional[float] = None
+    vega: Optional[float] = None
+    theta: Optional[float] = None
+    implied_vol: Optional[float] = None
+    underlying_price: Optional[float] = None
+    bid: Optional[float] = None
+    bid_size: Optional[int] = None
+    ask: Optional[float] = None
+    ask_size: Optional[int] = None
+    mid: Optional[float] = None
+    intrinsic_value: Optional[float] = None
+    extrinsic_value: Optional[float] = None
     volume: int = 0
     open_interest: int = 0
-    last_price: float = 0.0
+    last_price: Optional[float] = None
     last_date: Optional[str] = None
+    market_data_status: Optional[str] = None
+    quote_status: Optional[str] = None
+    greeks_status: Optional[str] = None
 
 
 class OrderItem(BaseModel):
@@ -117,22 +126,25 @@ class OptionQuoteItem(BaseModel):
     symbol: str
     right: str
     strike: float
-    bid: float = 0.0
-    bid_size: int = 0
-    ask: float = 0.0
-    ask_size: int = 0
-    mid: float = 0.0
-    last_price: float = 0.0
+    bid: Optional[float] = None
+    bid_size: Optional[int] = None
+    ask: Optional[float] = None
+    ask_size: Optional[int] = None
+    mid: Optional[float] = None
+    last_price: Optional[float] = None
     volume: int = 0
     open_interest: int = 0
-    implied_vol: float = 0.0
-    delta: float = 0.0
-    gamma: float = 0.0
-    theta: float = 0.0
-    vega: float = 0.0
-    intrinsic_value: float = 0.0
-    extrinsic_value: float = 0.0
+    implied_vol: Optional[float] = None
+    delta: Optional[float] = None
+    gamma: Optional[float] = None
+    theta: Optional[float] = None
+    vega: Optional[float] = None
+    intrinsic_value: Optional[float] = None
+    extrinsic_value: Optional[float] = None
     last_date: Optional[str] = None
+    market_data_status: Optional[str] = None
+    quote_status: Optional[str] = None
+    greeks_status: Optional[str] = None
 
 
 class StrikeChainRow(BaseModel):
@@ -149,6 +161,7 @@ class OptionChainQuotesResponse(BaseModel):
     exchange: str
     trading_class: str
     multiplier: str
+    market_data_status: Optional[str] = None
     strikes: List[StrikeChainRow]
 
 
@@ -187,16 +200,23 @@ class OptionSnapshot(Base):
     updated_at = Column(DateTime, default=datetime.now, index=True)
 
     # Market Data
-    last_price = Column(Float)
-    delta = Column(Float)
-    gamma = Column(Float)
-    theta = Column(Float)
-    vega = Column(Float)
-    implied_vol = Column(Float)
-    underlying_price = Column(Float)
+    last_price = Column(Float, nullable=True)
+    delta = Column(Float, nullable=True)
+    gamma = Column(Float, nullable=True)
+    theta = Column(Float, nullable=True)
+    vega = Column(Float, nullable=True)
+    implied_vol = Column(Float, nullable=True)
+    underlying_price = Column(Float, nullable=True)
     last_trade_date = Column(DateTime, nullable=True)
     volume = Column(Integer, nullable=True)
     open_interest = Column(Integer, nullable=True)
+    bid = Column(Float, nullable=True)
+    ask = Column(Float, nullable=True)
+    bid_size = Column(Integer, nullable=True)
+    ask_size = Column(Integer, nullable=True)
+    market_data_status = Column(String(20), nullable=True)
+    quote_status = Column(String(20), nullable=True)
+    greeks_status = Column(String(20), nullable=True)
 
 
 class MarketCache(Base):

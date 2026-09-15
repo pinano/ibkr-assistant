@@ -58,16 +58,26 @@ class OrderItem(BaseModel):
 
 class OptionGreeks(BaseModel):
     symbol: str
-    delta: float = 0.0
-    gamma: float = 0.0
-    vega: float = 0.0
-    theta: float = 0.0
-    implied_vol: float = 0.0
-    underlying_price: float = 0.0
+    delta: Optional[float] = None
+    gamma: Optional[float] = None
+    vega: Optional[float] = None
+    theta: Optional[float] = None
+    implied_vol: Optional[float] = None
+    underlying_price: Optional[float] = None
+    bid: Optional[float] = None
+    bid_size: Optional[int] = None
+    ask: Optional[float] = None
+    ask_size: Optional[int] = None
+    mid: Optional[float] = None
+    intrinsic_value: Optional[float] = None
+    extrinsic_value: Optional[float] = None
     volume: int = 0
     open_interest: int = 0
-    last_price: float = 0.0
+    last_price: Optional[float] = None
     last_date: Optional[str] = None
+    market_data_status: Optional[str] = None
+    quote_status: Optional[str] = None
+    greeks_status: Optional[str] = None
 
 
 class MarketSnapshot(BaseModel):
@@ -106,22 +116,25 @@ class OptionQuoteItem(BaseModel):
     symbol: str
     right: str
     strike: float
-    bid: float = 0.0
-    bid_size: int = 0
-    ask: float = 0.0
-    ask_size: int = 0
-    mid: float = 0.0
-    last_price: float = 0.0
+    bid: Optional[float] = None
+    bid_size: Optional[int] = None
+    ask: Optional[float] = None
+    ask_size: Optional[int] = None
+    mid: Optional[float] = None
+    last_price: Optional[float] = None
     volume: int = 0
     open_interest: int = 0
-    implied_vol: float = 0.0
-    delta: float = 0.0
-    gamma: float = 0.0
-    theta: float = 0.0
-    vega: float = 0.0
-    intrinsic_value: float = 0.0
-    extrinsic_value: float = 0.0
+    implied_vol: Optional[float] = None
+    delta: Optional[float] = None
+    gamma: Optional[float] = None
+    theta: Optional[float] = None
+    vega: Optional[float] = None
+    intrinsic_value: Optional[float] = None
+    extrinsic_value: Optional[float] = None
     last_date: Optional[str] = None
+    market_data_status: Optional[str] = None
+    quote_status: Optional[str] = None
+    greeks_status: Optional[str] = None
 
 
 class StrikeChainRow(BaseModel):
@@ -138,6 +151,7 @@ class OptionChainQuotesResponse(BaseModel):
     exchange: str
     trading_class: str
     multiplier: str
+    market_data_status: Optional[str] = None
     strikes: List[StrikeChainRow]
 
 
@@ -237,15 +251,28 @@ class TestOrderItem:
 # ---------------------------------------------------------------------------
 
 class TestOptionGreeks:
-    def test_default_zeros(self):
+    def test_default_none(self):
         g = OptionGreeks(symbol="AAPL 20261219 200 C")
-        assert g.delta == 0.0
-        assert g.gamma == 0.0
-        assert g.theta == 0.0
-        assert g.vega == 0.0
-        assert g.implied_vol == 0.0
-        assert g.underlying_price == 0.0
-        assert g.last_price == 0.0
+        assert g.delta is None
+        assert g.gamma is None
+        assert g.theta is None
+        assert g.vega is None
+        assert g.implied_vol is None
+        assert g.underlying_price is None
+        assert g.bid is None
+        assert g.bid_size is None
+        assert g.ask is None
+        assert g.ask_size is None
+        assert g.mid is None
+        assert g.intrinsic_value is None
+        assert g.extrinsic_value is None
+        assert g.last_price is None
+        assert g.last_date is None
+        assert g.market_data_status is None
+        assert g.quote_status is None
+        assert g.greeks_status is None
+        assert g.volume == 0
+        assert g.open_interest == 0
 
     def test_all_fields(self):
         g = OptionGreeks(
@@ -253,10 +280,14 @@ class TestOptionGreeks:
             delta=-0.35, gamma=0.02, theta=-0.05, vega=0.15,
             implied_vol=0.22, underlying_price=460.0,
             volume=1000, open_interest=5000,
-            last_price=8.50, last_date="2026-06-14 10:00:00"
+            last_price=8.50, last_date="2026-06-14 10:00:00",
+            market_data_status="LIVE", quote_status="LIVE", greeks_status="LIVE"
         )
         assert g.delta == -0.35
         assert g.last_date == "2026-06-14 10:00:00"
+        assert g.market_data_status == "LIVE"
+        assert g.quote_status == "LIVE"
+        assert g.greeks_status == "LIVE"
 
     def test_volume_int(self):
         g = OptionGreeks(symbol="X", volume=42)
@@ -462,15 +493,25 @@ class TestOptionChainQuoteModels:
         assert item.symbol == "P HMI  20260220 1900 M"
         assert item.right == "P"
         assert item.strike == 1900.0
-        assert item.bid == 0.0
-        assert item.ask == 0.0
-        assert item.mid == 0.0
+        assert item.bid is None
+        assert item.bid_size is None
+        assert item.ask is None
+        assert item.ask_size is None
+        assert item.mid is None
+        assert item.last_price is None
         assert item.volume == 0
         assert item.open_interest == 0
-        assert item.delta == 0.0
-        assert item.intrinsic_value == 0.0
-        assert item.extrinsic_value == 0.0
+        assert item.implied_vol is None
+        assert item.delta is None
+        assert item.gamma is None
+        assert item.theta is None
+        assert item.vega is None
+        assert item.intrinsic_value is None
+        assert item.extrinsic_value is None
         assert item.last_date is None
+        assert item.market_data_status is None
+        assert item.quote_status is None
+        assert item.greeks_status is None
 
     def test_option_quote_item_full(self):
         item = OptionQuoteItem(
@@ -493,7 +534,10 @@ class TestOptionChainQuoteModels:
             vega=1.2,
             intrinsic_value=10.0,
             extrinsic_value=37.0,
-            last_date="2026-03-08 15:30:00"
+            last_date="2026-03-08 15:30:00",
+            market_data_status="LIVE",
+            quote_status="LIVE",
+            greeks_status="FROZEN"
         )
         assert item.bid == 45.5
         assert item.ask == 48.0
@@ -502,6 +546,9 @@ class TestOptionChainQuoteModels:
         assert item.open_interest == 540
         assert item.delta == 0.48
         assert item.last_date == "2026-03-08 15:30:00"
+        assert item.market_data_status == "LIVE"
+        assert item.quote_status == "LIVE"
+        assert item.greeks_status == "FROZEN"
 
     def test_strike_chain_row_partial(self):
         row = StrikeChainRow(strike=1900.0, moneyness_pct=-2.5)
@@ -527,12 +574,14 @@ class TestOptionChainQuoteModels:
             exchange="DTB",
             trading_class="HMI",
             multiplier="100",
+            market_data_status="CLOSED",
             strikes=[row]
         )
         assert resp.symbol == "RMS"
         assert resp.underlying_price == 1900.0
         assert resp.exchange == "DTB"
         assert resp.trading_class == "HMI"
+        assert resp.market_data_status == "CLOSED"
         assert len(resp.strikes) == 1
         assert resp.strikes[0].strike == 1900.0
 

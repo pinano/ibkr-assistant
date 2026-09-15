@@ -25,9 +25,16 @@ from src.parsing import (
     parse_european_symbol,
     calc_option_intrinsic,
     calc_option_extrinsic,
+    calc_option_mid,
+    clean_price,
+    clean_size,
+    clean_greek,
     calc_moneyness_pct,
     filter_strikes_window,
     select_best_option_chain,
+    calc_bs_greeks,
+    is_market_open_for_symbol,
+    determine_market_statuses,
 )
 from src.models import (
     OptionGreeks,
@@ -39,6 +46,60 @@ from src.models import (
 )
 
 logger = logging.getLogger("ibkr-api")
+
+
+def _build_option_greeks_from_snap(snap: OptionSnapshot, right: str, strike: float) -> OptionGreeks:
+    has_g = _snap_is_valid(snap)
+    delta = round(snap.delta, 4) if (has_g and snap.delta is not None) else None
+    gamma = round(snap.gamma, 4) if (has_g and snap.gamma is not None) else None
+    theta = round(snap.theta, 4) if (has_g and snap.theta is not None) else None
+    vega = round(snap.vega, 4) if (has_g and snap.vega is not None) else None
+    iv = round(snap.implied_vol, 4) if (has_g and snap.implied_vol is not None and snap.implied_vol > 0) else None
+
+    bid = clean_price(snap.bid)
+    bid_size = clean_size(snap.bid_size) if bid is not None else None
+    ask = clean_price(snap.ask)
+    ask_size = clean_size(snap.ask_size) if ask is not None else None
+    mid = calc_option_mid(bid, ask)
+
+    last_price = clean_price(snap.last_price) if (snap.last_price and snap.last_price > 0) else None
+    last_date = snap.last_trade_date.strftime("%Y-%m-%d %H:%M:%S") if (snap.last_trade_date and last_price is not None) else None
+
+    und_price = clean_price(snap.underlying_price)
+    intrinsic = round(calc_option_intrinsic(right, strike, und_price), 4) if (und_price and strike > 0) else None
+    extrinsic = round(max(mid - intrinsic, 0.0), 4) if (mid is not None and intrinsic is not None) else None
+
+    is_open = is_market_open_for_symbol(snap.symbol)
+    statuses = determine_market_statuses(
+        is_open=is_open,
+        has_bid_ask=(bid is not None or ask is not None),
+        has_greeks=(delta is not None or iv is not None),
+        source="db"
+    )
+
+    return OptionGreeks(
+        symbol=snap.symbol,
+        delta=delta,
+        gamma=gamma,
+        vega=vega,
+        theta=theta,
+        implied_vol=iv,
+        underlying_price=und_price,
+        bid=bid,
+        bid_size=bid_size,
+        ask=ask,
+        ask_size=ask_size,
+        mid=mid,
+        intrinsic_value=intrinsic,
+        extrinsic_value=extrinsic,
+        last_price=last_price,
+        volume=snap.volume or 0,
+        open_interest=snap.open_interest or 0,
+        last_date=last_date,
+        market_data_status=statuses["market_data_status"],
+        quote_status=statuses["quote_status"],
+        greeks_status=statuses["greeks_status"]
+    )
 
 
 router = APIRouter()
@@ -151,23 +212,7 @@ async def get_option_greeks(
 
         if use_cache:
             logger.info(f"Serving cached greeks for conId={conId}")
-            # Prefer last_trade_date (actual trade time); fall back to updated_at for old rows
-            effective_date = snap.last_trade_date or snap.updated_at
-            cached_last_price = snap.last_price or 0.0
-            return OptionGreeks(
-                symbol=snap.symbol,
-                delta=snap.delta or 0.0,
-                gamma=snap.gamma or 0.0,
-                vega=snap.vega or 0.0,
-                theta=snap.theta or 0.0,
-                implied_vol=snap.implied_vol or 0.0,
-                underlying_price=snap.underlying_price or 0.0,
-                last_price=cached_last_price if cached_last_price > 0 else 0.0,
-                volume=snap.volume or 0,
-                open_interest=snap.open_interest or 0,
-                last_date=effective_date.strftime("%Y-%m-%d %H:%M:%S") if effective_date else None
-            )
-
+            return _build_option_greeks_from_snap(snap, right, strike)
 
         # 2b. Check CBOE (for US options)
         if prefix_exchange:
@@ -211,6 +256,10 @@ async def get_option_greeks(
                         snap.last_price = cboe_data.last_price
                         snap.volume = cboe_data.volume or 0
                         snap.open_interest = cboe_data.open_interest or 0
+                        snap.bid = cboe_data.bid
+                        snap.bid_size = cboe_data.bid_size
+                        snap.ask = cboe_data.ask
+                        snap.ask_size = cboe_data.ask_size
 
                         # Store actual last trade time from CBOE
                         if cboe_data.last_date:
@@ -265,47 +314,19 @@ async def get_option_greeks(
             logger.warning(f"Live qualification failed: {e}")
             if snap:
                 logger.info("Connection failed, falling back to STALE cache")
-                effective_date = snap.last_trade_date or snap.updated_at
-                cached_last_price = snap.last_price or 0.0
-                return OptionGreeks(
-                    symbol=snap.symbol,
-                    delta=snap.delta or 0.0,
-                    gamma=snap.gamma or 0.0,
-                    vega=snap.vega or 0.0,
-                    theta=snap.theta or 0.0,
-                    implied_vol=snap.implied_vol or 0.0,
-                    underlying_price=snap.underlying_price or 0.0,
-                    last_price=cached_last_price if cached_last_price > 0 else 0.0,
-                    volume=snap.volume or 0,
-                    open_interest=snap.open_interest or 0,
-                    last_date=effective_date.strftime("%Y-%m-%d %H:%M:%S") if effective_date else None
-                )
+                return _build_option_greeks_from_snap(snap, right, strike)
             raise e
 
         if not qualified or not qualified[0]:
             if snap:
                 logger.warning(
                     f"Contract qualification failed for {underlying}, serving STALE cache.")
-                effective_date = snap.last_trade_date or snap.updated_at
-                cached_last_price = snap.last_price or 0.0
-                return OptionGreeks(
-                    symbol=snap.symbol,
-                    delta=snap.delta or 0.0,
-                    gamma=snap.gamma or 0.0,
-                    vega=snap.vega or 0.0,
-                    theta=snap.theta or 0.0,
-                    implied_vol=snap.implied_vol or 0.0,
-                    underlying_price=snap.underlying_price or 0.0,
-                    last_price=cached_last_price if cached_last_price > 0 else 0.0,
-                    volume=snap.volume or 0,
-                    open_interest=snap.open_interest or 0,
-                    last_date=effective_date.strftime("%Y-%m-%d %H:%M:%S") if effective_date else None
-                )
+                return _build_option_greeks_from_snap(snap, right, strike)
             raise HTTPException(
                 status_code=404,
                 detail=f"Option contract not found: {underlying} {expiry} {strike} {right}")
 
-        # Request market data and wait for valid Greeks
+        # Request market data and wait for valid Greeks / Quote
         max_retries = 3
         best_g = None
         best_t = None
@@ -313,7 +334,7 @@ async def get_option_greeks(
         async def _fetch_market_data_with_retries():
             nonlocal best_g, best_t
             for attempt in range(max_retries):
-                client.reqMktData(qualified[0], '', False, False)
+                client.reqMktData(qualified[0], '100,101,106', False, False)
 
                 t = None
                 g = None
@@ -324,26 +345,32 @@ async def get_option_greeks(
                         t = client.ticker(qualified[0])
                         if t:
                             g = t.modelGreeks or t.bidGreeks or t.askGreeks or t.lastGreeks
-                            if _greeks_are_valid(g):
+                            has_g = _greeks_are_valid(g)
+                            has_b = t.bid is not None and not math.isnan(t.bid) and t.bid >= 0
+                            has_a = t.ask is not None and not math.isnan(t.ask) and t.ask >= 0
+                            if has_g and (has_b or has_a):
                                 break
-                            if _ >= 30 and (t.last is not None and not math.isnan(t.last)):
+                            if _ >= 30 and (has_g or (has_b and has_a) or (t.last is not None and not math.isnan(t.last) and t.last > 0)):
                                 break
                 finally:
                     client.cancelMktData(qualified[0])
 
                 current_g = t.modelGreeks or t.bidGreeks or t.askGreeks or t.lastGreeks if t else None
                 current_last = t.last if (t and t.last is not None and not math.isnan(t.last)) else None
+                has_b = t and t.bid is not None and not math.isnan(t.bid) and t.bid >= 0
+                has_a = t and t.ask is not None and not math.isnan(t.ask) and t.ask >= 0
 
                 is_valid = _greeks_are_valid(current_g)
                 has_price = current_last is not None and current_last > 0
+                has_quote = has_b or has_a
 
-                if is_valid:
+                if is_valid and has_quote:
                     best_g = current_g
                     best_t = t
-                    logger.info(f"Fetched valid Greeks on attempt {attempt+1}/{max_retries}")
+                    logger.info(f"Fetched valid Greeks and Quote on attempt {attempt+1}/{max_retries}")
                     return
 
-                if has_price:
+                if is_valid or has_price or has_quote:
                     if best_t is None:
                         best_t = t
                         best_g = current_g
@@ -352,7 +379,7 @@ async def get_option_greeks(
                     logger.info(f"Attempt {attempt+1}/{max_retries} for {display_symbol} yielded incomplete data. Retrying...")
                     await asyncio.sleep(1.0)
                 else:
-                    logger.warning(f"Failed to fetch valid Greeks for {display_symbol} after {max_retries} attempts.")
+                    logger.warning(f"Failed to fetch complete market data for {display_symbol} after {max_retries} attempts.")
                     if best_t is None:
                         best_t = t
                         best_g = current_g
@@ -365,25 +392,14 @@ async def get_option_greeks(
         t = best_t
         g = best_g
 
-        if not t or not (g or (t.last is not None and not math.isnan(t.last))):
+        has_bid = t and t.bid is not None and not math.isnan(t.bid) and t.bid >= 0
+        has_ask = t and t.ask is not None and not math.isnan(t.ask) and t.ask >= 0
+
+        if not t or not (g or (t.last is not None and not math.isnan(t.last) and t.last > 0) or has_bid or has_ask):
             if snap:
                 logger.warning(
                     f"No live data received for {underlying}, serving STALE cache.")
-                effective_date = snap.last_trade_date or snap.updated_at
-                cached_last_price = snap.last_price or 0.0
-                return OptionGreeks(
-                    symbol=snap.symbol,
-                    delta=snap.delta or 0.0,
-                    gamma=snap.gamma or 0.0,
-                    vega=snap.vega or 0.0,
-                    theta=snap.theta or 0.0,
-                    implied_vol=snap.implied_vol or 0.0,
-                    underlying_price=snap.underlying_price or 0.0,
-                    last_price=cached_last_price if cached_last_price > 0 else 0.0,
-                    volume=snap.volume or 0,
-                    open_interest=snap.open_interest or 0,
-                    last_date=effective_date.strftime("%Y-%m-%d %H:%M:%S") if effective_date else None
-                )
+                return _build_option_greeks_from_snap(snap, right, strike)
             raise HTTPException(
                 status_code=404,
                 detail="No live market data received and no cache available")
@@ -393,12 +409,49 @@ async def get_option_greeks(
         t_last = getattr(t, 'last', None)
         t_time = getattr(t, 'time', None) or getattr(t, 'lastTime', None)
 
-        def safe_float(val):
-            """Return 0.0 if val is None or NaN."""
-            return val if (val is not None and not math.isnan(val)) else 0.0
+        bid = clean_price(t.bid) if t else None
+        bid_size = clean_size(t.bidSize) if (t and bid is not None) else None
+        ask = clean_price(t.ask) if t else None
+        ask_size = clean_size(t.askSize) if (t and ask is not None) else None
+        mid = calc_option_mid(bid, ask)
+
+        last_trade = clean_price(t_last) if (t_last is not None and t_last > 0) else None
+        last_price = last_trade
+        last_date = None
+        if last_trade is not None:
+            if t_time and hasattr(t_time, 'strftime'):
+                last_date = t_time.strftime("%Y-%m-%d %H:%M:%S")
+        elif snap and snap.last_price and snap.last_price > 0:
+            last_price = snap.last_price
+            if snap.last_trade_date and hasattr(snap.last_trade_date, 'strftime'):
+                last_date = snap.last_trade_date.strftime("%Y-%m-%d %H:%M:%S")
 
         has_valid_greeks = _greeks_are_valid(g)
-        has_valid_price = t_last is not None and not math.isnan(t_last) and t_last > 0
+        if has_valid_greeks:
+            delta = round(clean_greek(g.delta), 4) if clean_greek(g.delta) is not None else None
+            gamma = round(clean_greek(g.gamma), 4) if clean_greek(g.gamma) is not None else None
+            theta = round(clean_greek(g.theta), 4) if clean_greek(g.theta) is not None else None
+            vega = round(clean_greek(g.vega), 4) if clean_greek(g.vega) is not None else None
+            raw_iv = clean_greek(g.impliedVol)
+            iv = round(raw_iv, 4) if (raw_iv is not None and raw_iv > 0) else None
+            raw_und = clean_greek(g.undPrice)
+            und_price = raw_und if (raw_und is not None and raw_und > 0) else None
+        elif snap and _snap_is_valid(snap):
+            delta = round(snap.delta, 4) if snap.delta is not None else None
+            gamma = round(snap.gamma, 4) if snap.gamma is not None else None
+            theta = round(snap.theta, 4) if snap.theta is not None else None
+            vega = round(snap.vega, 4) if snap.vega is not None else None
+            iv = round(snap.implied_vol, 4) if (snap.implied_vol is not None and snap.implied_vol > 0) else None
+            und_price = snap.underlying_price if (snap.underlying_price and snap.underlying_price > 0) else None
+        else:
+            delta = gamma = theta = vega = iv = None
+            und_price = snap.underlying_price if (snap and snap.underlying_price and snap.underlying_price > 0) else None
+
+        intrinsic = round(calc_option_intrinsic(right, strike, und_price), 4) if (und_price and strike > 0) else None
+        extrinsic = round(max(mid - intrinsic, 0.0), 4) if (mid is not None and intrinsic is not None) else None
+
+        has_valid_price = last_trade is not None
+        has_valid_quote = (bid is not None) or (ask is not None)
 
         # Determine if this is a non-US option during closed EU hours
         if prefix_exchange:
@@ -409,15 +462,11 @@ async def get_option_greeks(
 
         should_save = False
         if qualified and qualified[0]:
-             if has_valid_greeks:
-                 should_save = True
-             elif has_valid_price:
-                 should_save = True
-             elif eu_closed and g is not None:
-                 # EU market is closed — frozen data is the best we'll get.
-                 # Cache it to avoid hammering the gateway on every request.
-                 should_save = True
-                 logger.info(f"EU closed: caching frozen data for {display_symbol} (Greeks may be partial)")
+            if has_valid_greeks or has_valid_price or has_valid_quote:
+                should_save = True
+            elif eu_closed and g is not None:
+                should_save = True
+                logger.info(f"EU closed: caching frozen data for {display_symbol} (Greeks may be partial)")
 
         if should_save:
             cid = qualified[0].conId
@@ -432,43 +481,121 @@ async def get_option_greeks(
                 db.add(snap)
             else:
                 snap.symbol = display_symbol
-            snap.conId = cid  # Always update: may have been 0 from a prior CBOE save
+            snap.conId = cid
 
             snap.updated_at = datetime.now()
-            snap.delta = safe_float(g.delta) if g else 0.0
-            snap.gamma = safe_float(g.gamma) if g else 0.0
-            snap.theta = safe_float(g.theta) if g else 0.0
-            snap.vega = safe_float(g.vega) if g else 0.0
-            snap.implied_vol = safe_float(g.impliedVol) if g else 0.0
-            snap.underlying_price = safe_float(g.undPrice) if g else 0.0
-            # Filter IBKR's -1 sentinel (means "no data")
-            snap.last_price = safe_float(t_last) if (t_last is not None and t_last > 0) else 0.0
-            snap.volume = int(t_vol) if (t_vol is not None and not math.isnan(t_vol)) else 0
-            snap.open_interest = int(t_oi) if (t_oi is not None and not math.isnan(t_oi)) else 0
+            snap.delta = delta
+            snap.gamma = gamma
+            snap.theta = theta
+            snap.vega = vega
+            snap.implied_vol = iv
+            snap.underlying_price = und_price
+            if last_trade is not None:
+                snap.last_price = last_trade
+                if t_time and hasattr(t_time, 'strftime'):
+                    snap.last_trade_date = t_time
+            snap.volume = int(t_vol) if (t_vol is not None and not math.isnan(t_vol) and t_vol >= 0) else (snap.volume or 0)
+            snap.open_interest = int(t_oi) if (t_oi is not None and not math.isnan(t_oi) and t_oi >= 0) else (snap.open_interest or 0)
+            if bid is not None:
+                snap.bid = bid
+                snap.bid_size = bid_size
+            if ask is not None:
+                snap.ask = ask
+                snap.ask_size = ask_size
 
-            # Store actual last trade time from IBKR (allow NULL database entry if missing)
-            snap.last_trade_date = t_time  # t_time is a datetime object or None
-
-            db.commit()
-            logger.info(f"Cached data for {display_symbol} (conId={cid}, Greeks={has_valid_greeks}, Price={has_valid_price})")
+            is_open_sym = is_market_open_for_symbol(
+                symbol=underlying,
+                exchange=prefix_exchange or (qualified[0].exchange if qualified and qualified[0] else None),
+                currency=prefix_currency or (qualified[0].currency if qualified and qualified[0] else None)
+            )
+            mkt_data_type = getattr(t, 'marketDataType', 1) if t else 1
+            statuses = determine_market_statuses(
+                is_open=is_open_sym,
+                has_bid_ask=(bid is not None or ask is not None),
+                has_greeks=(delta is not None or iv is not None),
+                market_data_type=mkt_data_type,
+                source="ibkr"
+            )
+            snap.market_data_status = statuses["market_data_status"]
+            snap.quote_status = statuses["quote_status"]
+            try:
+                db.commit()
+                logger.info(f"Cached data for {display_symbol} (conId={cid}, Greeks={has_valid_greeks}, Price={has_valid_price}, Quote={has_valid_quote})")
+            except Exception as commit_err:
+                logger.warning(f"Failed to cache data for {display_symbol}: {commit_err}. Retrying with fresh transaction...")
+                db.rollback()
+                try:
+                    fresh_snap = db.query(OptionSnapshot).filter(
+                        or_(
+                            OptionSnapshot.symbol == display_symbol,
+                            OptionSnapshot.symbol == f"{underlying} {expiry} {strike} {right}"
+                        )
+                    ).first()
+                    if fresh_snap:
+                        fresh_snap.delta = delta
+                        fresh_snap.gamma = gamma
+                        fresh_snap.theta = theta
+                        fresh_snap.vega = vega
+                        fresh_snap.implied_vol = iv
+                        fresh_snap.underlying_price = und_price
+                        if last_trade is not None:
+                            fresh_snap.last_price = last_trade
+                        if bid is not None:
+                            fresh_snap.bid = bid
+                            fresh_snap.bid_size = bid_size
+                        if ask is not None:
+                            fresh_snap.ask = ask
+                            fresh_snap.ask_size = ask_size
+                        fresh_snap.market_data_status = statuses["market_data_status"]
+                        fresh_snap.quote_status = statuses["quote_status"]
+                        fresh_snap.greeks_status = statuses["greeks_status"]
+                        fresh_snap.updated_at = datetime.now()
+                        db.commit()
+                except Exception as retry_err:
+                    logger.warning(f"Retry commit failed for {display_symbol}: {retry_err}")
+                    db.rollback()
         elif qualified and qualified[0]:
-            logger.warning(f"Skipping DB cache for {display_symbol}: Greeks data invalid (all zeros or missing underlying price)")
+            logger.warning(f"Skipping DB cache for {display_symbol}: No valid market data or Greeks")
+            is_open_sym = is_market_open_for_symbol(
+                symbol=underlying,
+                exchange=prefix_exchange or (qualified[0].exchange if qualified and qualified[0] else None),
+                currency=prefix_currency or (qualified[0].currency if qualified and qualified[0] else None)
+            )
+            mkt_data_type = getattr(t, 'marketDataType', 1) if t else 1
+            statuses = determine_market_statuses(
+                is_open=is_open_sym,
+                has_bid_ask=(bid is not None or ask is not None),
+                has_greeks=(delta is not None or iv is not None),
+                market_data_type=mkt_data_type,
+                source="ibkr"
+            )
+        else:
+            statuses = {"market_data_status": "CLOSED", "quote_status": "CLOSED", "greeks_status": "CLOSED"}
 
         return OptionGreeks(
             symbol=display_symbol,
-            delta=safe_float(g.delta) if g else 0.0,
-            gamma=safe_float(g.gamma) if g else 0.0,
-            vega=safe_float(g.vega) if g else 0.0,
-            theta=safe_float(g.theta) if g else 0.0,
-            implied_vol=safe_float(g.impliedVol) if g else 0.0,
-            underlying_price=safe_float(g.undPrice) if g else 0.0,
+            delta=delta,
+            gamma=gamma,
+            vega=vega,
+            theta=theta,
+            implied_vol=iv,
+            underlying_price=und_price,
+            bid=bid,
+            bid_size=bid_size,
+            ask=ask,
+            ask_size=ask_size,
+            mid=mid,
+            intrinsic_value=intrinsic,
+            extrinsic_value=extrinsic,
             volume=int(t_vol) if (
-                t_vol is not None and not math.isnan(t_vol)) else 0,
+                t_vol is not None and not math.isnan(t_vol) and t_vol >= 0) else 0,
             open_interest=int(t_oi) if (
-                t_oi is not None and not math.isnan(t_oi)) else 0,
-            last_price=t_last if (
-                t_last is not None and not math.isnan(t_last) and t_last > 0) else 0.0,
-            last_date=t_time.strftime("%Y-%m-%d %H:%M:%S") if t_time else datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                t_oi is not None and not math.isnan(t_oi) and t_oi >= 0) else 0,
+            last_price=last_price,
+            last_date=last_date,
+            market_data_status=statuses["market_data_status"],
+            quote_status=statuses["quote_status"],
+            greeks_status=statuses["greeks_status"]
         )
 
     except Exception as e:
@@ -575,7 +702,7 @@ async def get_option_risk(symbol: str):
                 detail=f"Option contract not found for {symbol}")
 
         # Request Data and wait (with global timeout)
-        client.reqMktData(qualified[0], '', False, False)
+        client.reqMktData(qualified[0], '100,101,106', False, False)
 
         t = None
 
@@ -586,7 +713,12 @@ async def get_option_risk(symbol: str):
                 t = client.ticker(qualified[0])
                 if t:
                     g = t.modelGreeks or t.bidGreeks or t.askGreeks or t.lastGreeks
-                    if g or (t.last is not None and not math.isnan(t.last)):
+                    has_g = _greeks_are_valid(g)
+                    has_b = t.bid is not None and not math.isnan(t.bid) and t.bid >= 0
+                    has_a = t.ask is not None and not math.isnan(t.ask) and t.ask >= 0
+                    if has_g and (has_b or has_a):
+                        break
+                    if _ >= 30 and (has_g or (has_b and has_a) or (t.last is not None and not math.isnan(t.last) and t.last > 0)):
                         break
 
         try:
@@ -607,23 +739,69 @@ async def get_option_risk(symbol: str):
         t_last = getattr(t, 'last', None)
         t_time = getattr(t, 'time', None) or getattr(t, 'lastTime', None)
 
-        def safe_float(val):
-            return val if (val is not None and not math.isnan(val)) else 0.0
+        bid = clean_price(t.bid) if t else None
+        bid_size = clean_size(t.bidSize) if (t and bid is not None) else None
+        ask = clean_price(t.ask) if t else None
+        ask_size = clean_size(t.askSize) if (t and ask is not None) else None
+        mid = calc_option_mid(bid, ask)
+
+        last_trade = clean_price(t_last) if (t_last is not None and t_last > 0) else None
+        last_date = t_time.strftime("%Y-%m-%d %H:%M:%S") if (t_time and hasattr(t_time, 'strftime') and last_trade is not None) else None
+
+        has_valid_greeks = _greeks_are_valid(g)
+        if has_valid_greeks:
+            delta = round(clean_greek(g.delta), 4) if clean_greek(g.delta) is not None else None
+            gamma = round(clean_greek(g.gamma), 4) if clean_greek(g.gamma) is not None else None
+            theta = round(clean_greek(g.theta), 4) if clean_greek(g.theta) is not None else None
+            vega = round(clean_greek(g.vega), 4) if clean_greek(g.vega) is not None else None
+            raw_iv = clean_greek(g.impliedVol)
+            iv = round(raw_iv, 4) if (raw_iv is not None and raw_iv > 0) else None
+            raw_und = clean_greek(g.undPrice)
+            und_price = raw_und if (raw_und is not None and raw_und > 0) else None
+        else:
+            delta = gamma = theta = vega = iv = und_price = None
+
+        intrinsic = round(calc_option_intrinsic(right, strike_val, und_price), 4) if (und_price and strike_val > 0) else None
+        extrinsic = round(max(mid - intrinsic, 0.0), 4) if (mid is not None and intrinsic is not None) else None
+
+        is_open_sym = is_market_open_for_symbol(
+            symbol=symbol,
+            exchange=qualified[0].exchange if qualified and qualified[0] else None,
+            currency=qualified[0].currency if qualified and qualified[0] else None
+        )
+        mkt_data_type = getattr(t, 'marketDataType', 1) if t else 1
+        statuses = determine_market_statuses(
+            is_open=is_open_sym,
+            has_bid_ask=(bid is not None or ask is not None),
+            has_greeks=(delta is not None or iv is not None),
+            market_data_type=mkt_data_type,
+            source="ibkr"
+        )
 
         return OptionGreeks(
             symbol=symbol,
-            delta=safe_float(g.delta) if g else 0.0,
-            gamma=safe_float(g.gamma) if g else 0.0,
-            vega=safe_float(g.vega) if g else 0.0,
-            theta=safe_float(g.theta) if g else 0.0,
-            implied_vol=safe_float(g.impliedVol) if g else 0.0,
-            underlying_price=safe_float(g.undPrice) if g else 0.0,
+            delta=delta,
+            gamma=gamma,
+            vega=vega,
+            theta=theta,
+            implied_vol=iv,
+            underlying_price=und_price,
+            bid=bid,
+            bid_size=bid_size,
+            ask=ask,
+            ask_size=ask_size,
+            mid=mid,
+            intrinsic_value=intrinsic,
+            extrinsic_value=extrinsic,
             volume=int(t_vol) if (
-                t_vol is not None and not math.isnan(t_vol)) else 0,
+                t_vol is not None and not math.isnan(t_vol) and t_vol >= 0) else 0,
             open_interest=int(t_oi) if (
-                t_oi is not None and not math.isnan(t_oi)) else 0,
-            last_price=safe_float(t_last),
-            last_date=t_time.strftime("%Y-%m-%d %H:%M:%S") if t_time else datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                t_oi is not None and not math.isnan(t_oi) and t_oi >= 0) else 0,
+            last_price=last_trade,
+            last_date=last_date,
+            market_data_status=statuses["market_data_status"],
+            quote_status=statuses["quote_status"],
+            greeks_status=statuses["greeks_status"]
         )
 
     except Exception as e:
@@ -642,15 +820,42 @@ async def get_option_chain(symbol: str):
     """
     client = await get_ib()
 
-    ticker, exchange, currency = parse_symbol(symbol)
+    clean_symbol = symbol.strip()
+    prefix_exchange = None
+    prefix_currency = None
+
+    if ':' in clean_symbol:
+        parts = clean_symbol.split(':')
+        if len(parts) == 2:
+            prefix = parts[0].upper()
+            clean_symbol = parts[1]
+            if prefix in EXCHANGE_PREFIXES:
+                prefix_exchange, prefix_currency = EXCHANGE_PREFIXES[prefix]
+
+    ticker, parsed_exchange, currency = parse_symbol(clean_symbol)
+    stk_exchange = prefix_exchange or parsed_exchange
+    stk_currency = prefix_currency or currency
 
     contract = Contract(
         symbol=ticker,
         secType="STK",
-        exchange=exchange,
-        currency=currency)
+        exchange="SMART",
+        currency=stk_currency
+    )
+    if stk_exchange and stk_exchange != "SMART":
+        contract.primaryExchange = stk_exchange
+
     qualified = await client.qualifyContractsAsync(contract)
-    if not qualified:
+    if not qualified or not qualified[0]:
+        contract_raw = Contract(
+            symbol=ticker,
+            secType="STK",
+            exchange=stk_exchange,
+            currency=stk_currency
+        )
+        qualified = await client.qualifyContractsAsync(contract_raw)
+
+    if not qualified or not qualified[0]:
         raise HTTPException(status_code=404,
                             detail=f"Underlying {symbol} not found")
 
@@ -731,18 +936,21 @@ async def get_option_chain_quotes(
     contract = Contract(
         symbol=ticker,
         secType="STK",
-        exchange=stk_exchange,
+        exchange="SMART",
         currency=stk_currency
     )
+    if stk_exchange and stk_exchange != "SMART":
+        contract.primaryExchange = stk_exchange
+
     qualified = await client.qualifyContractsAsync(contract)
     if not qualified or not qualified[0]:
-        contract_smart = Contract(
+        contract_raw = Contract(
             symbol=ticker,
             secType="STK",
-            exchange="SMART",
+            exchange=stk_exchange,
             currency=stk_currency
         )
-        qualified = await client.qualifyContractsAsync(contract_smart)
+        qualified = await client.qualifyContractsAsync(contract_raw)
 
     if not qualified or not qualified[0]:
         raise HTTPException(status_code=404, detail=f"Underlying {symbol} not found")
@@ -754,7 +962,7 @@ async def get_option_chain_quotes(
     underlying_price = 0.0
     try:
         client.reqMktData(underlying, '', False, False)
-        for _ in range(15):
+        for _ in range(20):
             await asyncio.sleep(0.1)
             t_und = client.ticker(underlying)
             if t_und:
@@ -767,6 +975,10 @@ async def get_option_chain_quotes(
                     break
                 if t_und.close is not None and not math.isnan(t_und.close) and t_und.close > 0:
                     underlying_price = t_und.close
+                    break
+                if (t_und.bid is not None and not math.isnan(t_und.bid) and t_und.bid > 0
+                        and t_und.ask is not None and not math.isnan(t_und.ask) and t_und.ask > 0):
+                    underlying_price = (t_und.bid + t_und.ask) * 0.5
                     break
         client.cancelMktData(underlying)
     except Exception as e:
@@ -897,12 +1109,13 @@ async def get_option_chain_quotes(
         r = c.right.upper()
         s = c.strike
 
-        bid = safe_f(t.bid) if t and t.bid != -1 else 0.0
-        bid_size = safe_i(t.bidSize) if t else 0
-        ask = safe_f(t.ask) if t and t.ask != -1 else 0.0
-        ask_size = safe_i(t.askSize) if t else 0
-        last = safe_f(t.last) if t and t.last != -1 and t.last > 0 else 0.0
-        mid = (bid + ask) * 0.5 if (bid > 0 and ask > 0) else (last or bid or ask or 0.0)
+        bid = clean_price(t.bid) if t else None
+        bid_size = clean_size(t.bidSize) if (t and bid is not None) else None
+        ask = clean_price(t.ask) if t else None
+        ask_size = clean_size(t.askSize) if (t and ask is not None) else None
+        mid = calc_option_mid(bid, ask)
+
+        last_trade = clean_price(t.last) if (t and t.last is not None and t.last > 0) else None
 
         # Volume
         vol = safe_i(getattr(t, 'volume', 0)) if t else 0
@@ -919,27 +1132,63 @@ async def get_option_chain_quotes(
             if oi == 0:
                 oi = safe_i(getattr(t, 'openInterest', 0))
 
-        # Greeks
-        g = t.modelGreeks or t.bidGreeks or t.askGreeks or t.lastGreeks if t else None
-        delta = safe_f(g.delta) if g else 0.0
-        gamma = safe_f(g.gamma) if g else 0.0
-        theta = safe_f(g.theta) if g else 0.0
-        vega = safe_f(g.vega) if g else 0.0
-        iv = safe_f(g.impliedVol) if g else 0.0
+        # Greeks: find candidate with valid IV or delta
+        g = None
+        for cand in (t.modelGreeks, t.lastGreeks, t.bidGreeks, t.askGreeks) if t else ():
+            if cand and cand.impliedVol is not None and not math.isnan(cand.impliedVol) and cand.impliedVol > 0:
+                g = cand
+                break
+        if not g and t:
+            for cand in (t.modelGreeks, t.lastGreeks, t.bidGreeks, t.askGreeks):
+                if cand and cand.delta is not None and not math.isnan(cand.delta):
+                    g = cand
+                    break
 
-        if underlying_price <= 0.0 and g and safe_f(g.undPrice) > 0.0:
-            underlying_price = safe_f(g.undPrice)
+        raw_iv = clean_greek(g.impliedVol) if g else None
+        iv_cand = raw_iv if (raw_iv is not None and raw_iv > 0) else 0.0
 
-        intrinsic = calc_option_intrinsic(r, s, underlying_price)
-        effective_price = last if last > 0 else mid
-        extrinsic = calc_option_extrinsic(effective_price, intrinsic)
+        if underlying_price <= 0.0 and g and clean_greek(g.undPrice) and clean_greek(g.undPrice) > 0.0:
+            underlying_price = clean_greek(g.undPrice)
+
+        if _greeks_are_valid(g):
+            delta = round(clean_greek(g.delta), 4) if clean_greek(g.delta) is not None else None
+            gamma = round(clean_greek(g.gamma), 4) if clean_greek(g.gamma) is not None else None
+            theta = round(clean_greek(g.theta), 4) if clean_greek(g.theta) is not None else None
+            vega = round(clean_greek(g.vega), 4) if clean_greek(g.vega) is not None else None
+            iv = round(iv_cand, 4) if iv_cand > 0 else None
+        elif underlying_price > 0.0 and iv_cand > 0.0 and clean_expiry:
+            bs = calc_bs_greeks(r, underlying_price, s, clean_expiry, iv_cand)
+            delta = bs["delta"]
+            gamma = bs["gamma"]
+            theta = bs["theta"]
+            vega = bs["vega"]
+            iv = round(iv_cand, 4)
+        else:
+            delta = gamma = theta = vega = iv = None
+
+        intrinsic = round(calc_option_intrinsic(r, s, underlying_price), 2) if (underlying_price > 0 and s > 0) else None
+        extrinsic = round(max(mid - intrinsic, 0.0), 2) if (mid is not None and intrinsic is not None) else None
 
         last_date_str = None
         t_time = getattr(t, 'time', None) or getattr(t, 'lastTime', None)
-        if t_time and hasattr(t_time, 'strftime'):
+        if t_time and hasattr(t_time, 'strftime') and last_trade is not None:
             last_date_str = t_time.strftime("%Y-%m-%d %H:%M:%S")
 
         symbol_name = c.localSymbol or f"{underlying.symbol} {clean_expiry} {s} {r}"
+
+        mkt_data_type = getattr(t, 'marketDataType', 1) if t else 1
+        is_open_chain = is_market_open_for_symbol(
+            symbol=underlying.symbol,
+            exchange=selected_chain.exchange,
+            currency=underlying.currency
+        )
+        statuses = determine_market_statuses(
+            is_open=is_open_chain,
+            has_bid_ask=(bid is not None or ask is not None),
+            has_greeks=(delta is not None or iv is not None),
+            market_data_type=mkt_data_type,
+            source="ibkr"
+        )
 
         quotes_by_key[(s, r)] = OptionQuoteItem(
             conId=c.conId,
@@ -950,18 +1199,21 @@ async def get_option_chain_quotes(
             bid_size=bid_size,
             ask=ask,
             ask_size=ask_size,
-            mid=round(mid, 4),
-            last_price=last,
+            mid=mid,
+            last_price=last_trade,
             volume=vol,
             open_interest=oi,
-            implied_vol=round(iv, 4),
-            delta=round(delta, 4),
-            gamma=round(gamma, 4),
-            theta=round(theta, 4),
-            vega=round(vega, 4),
-            intrinsic_value=round(intrinsic, 2),
-            extrinsic_value=round(extrinsic, 2),
-            last_date=last_date_str
+            implied_vol=iv,
+            delta=delta,
+            gamma=gamma,
+            theta=theta,
+            vega=vega,
+            intrinsic_value=intrinsic,
+            extrinsic_value=extrinsic,
+            last_date=last_date_str,
+            market_data_status=statuses["market_data_status"],
+            quote_status=statuses["quote_status"],
+            greeks_status=statuses["greeks_status"]
         )
 
     # Build strike rows
@@ -977,6 +1229,13 @@ async def get_option_chain_quotes(
             put=p_quote
         ))
 
+    is_open_chain = is_market_open_for_symbol(
+        symbol=underlying.symbol,
+        exchange=selected_chain.exchange,
+        currency=underlying.currency
+    )
+    chain_status = "CLOSED" if not is_open_chain else ("DELAYED" if any(getattr(client.ticker(c), 'marketDataType', 1) == 3 for c in valid_contracts[:5]) else "LIVE")
+
     return OptionChainQuotesResponse(
         symbol=underlying.symbol,
         underlying_price=round(underlying_price, 2),
@@ -984,6 +1243,7 @@ async def get_option_chain_quotes(
         exchange=selected_chain.exchange,
         trading_class=selected_chain.tradingClass,
         multiplier=selected_chain.multiplier,
+        market_data_status=chain_status,
         strikes=strike_rows
     )
 

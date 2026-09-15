@@ -146,9 +146,9 @@ class Monitor:
                         underlying.split(':')[-1].upper() in settings.delta_alert_exclude_list):
                     continue
 
-                delta = data.get('delta', 0.0)
-                # Ignore if delta is effectively zero (no data)
-                if abs(delta) < 0.0001:
+                delta = data.get('delta')
+                # Ignore if delta is missing or effectively zero (no data)
+                if delta is None or abs(delta) < 0.0001:
                     continue
 
                 if abs(delta) > settings.DELTA_ALERT_THRESHOLD:
@@ -168,25 +168,24 @@ class Monitor:
                     exp_fmt = expiry.replace("-", "")
 
                     # Capture price data for IV/TV calculation
-                    raw_last = data.get('last_price', 0.0)
-                    raw_und = data.get('underlying_price', 0.0)
-                    last_price = None
-                    underlying_price = None
-                    if raw_last and raw_last > 0:
-                        last_price = raw_last
-                    if raw_und and raw_und > 0:
-                        underlying_price = raw_und
+                    raw_last = data.get('last_price')
+                    raw_und = data.get('underlying_price')
+                    raw_mid = data.get('mid')
+                    last_price = raw_last if (raw_last and raw_last > 0) else None
+                    underlying_price = raw_und if (raw_und and raw_und > 0) else None
 
                     # Compute intrinsic value and time value
                     intrinsic = None
                     time_value = None
-                    if last_price is not None and underlying_price is not None and strike:
+                    if underlying_price is not None and strike:
                         right_upper = right.upper()
                         if right_upper == 'P':
                             intrinsic = max(0.0, strike - underlying_price)
                         else:  # Call
                             intrinsic = max(0.0, underlying_price - strike)
-                        time_value = last_price - intrinsic
+                        # Rule 6: Use mid for extrinsic/time_value. If mid is not available, do not use last_price!
+                        if raw_mid is not None:
+                            time_value = max(0.0, raw_mid - intrinsic)
 
                     # Calculate data age in minutes
                     age_str = ""

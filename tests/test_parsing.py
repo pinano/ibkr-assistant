@@ -23,9 +23,16 @@ from src.parsing import (
     parse_european_symbol,
     calc_option_intrinsic,
     calc_option_extrinsic,
+    calc_option_mid,
+    clean_price,
+    clean_size,
+    clean_greek,
     calc_moneyness_pct,
     filter_strikes_window,
     select_best_option_chain,
+    calc_bs_greeks,
+    is_market_open_for_symbol,
+    determine_market_statuses,
 )
 
 
@@ -466,6 +473,113 @@ class TestCalcOptionExtrinsic:
     def test_zero_price_returns_zero(self):
         assert calc_option_extrinsic(0.0, 10.0) == 0.0
 
+    def test_none_price_or_intrinsic_returns_none(self):
+        assert calc_option_extrinsic(None, 10.0) is None
+        assert calc_option_extrinsic(15.0, None) is None
+        assert calc_option_extrinsic(None, None) is None
+
+    def test_rms_put_scenario(self):
+        # RMS 1580P scenario: strike 1580, spot 1420 -> intrinsic 160.0
+        # If mid is 151.75 -> extrinsic is max(151.75 - 160.0, 0) == 0.0 (never negative)
+        assert calc_option_extrinsic(151.75, 160.0) == 0.0
+
+
+class TestCleanPrice:
+    """Tests for clean_price helper."""
+
+    def test_none_returns_none(self):
+        assert clean_price(None) is None
+
+    def test_negative_returns_none(self):
+        assert clean_price(-1) is None
+        assert clean_price(-1.0) is None
+        assert clean_price(-0.01) is None
+
+    def test_nan_returns_none(self):
+        assert clean_price(float("nan")) is None
+
+    def test_zero_returns_zero(self):
+        # Must distinguish real price 0.0 from missing data (None)
+        assert clean_price(0) == 0.0
+        assert clean_price(0.0) == 0.0
+        assert clean_price("0.0") == 0.0
+
+    def test_valid_positive_price(self):
+        assert clean_price(147.0) == 147.0
+        assert clean_price("156.5") == 156.5
+
+    def test_invalid_string_returns_none(self):
+        assert clean_price("invalid") is None
+        assert clean_price("") is None
+
+
+class TestCleanSize:
+    """Tests for clean_size helper."""
+
+    def test_none_returns_none(self):
+        assert clean_size(None) is None
+
+    def test_negative_returns_none(self):
+        assert clean_size(-1) is None
+
+    def test_nan_returns_none(self):
+        assert clean_size(float("nan")) is None
+
+    def test_zero_returns_zero(self):
+        assert clean_size(0) == 0
+        assert clean_size("0") == 0
+
+    def test_valid_size(self):
+        assert clean_size(10) == 10
+        assert clean_size(15.0) == 15
+        assert clean_size("25") == 25
+
+
+class TestCleanGreek:
+    """Tests for clean_greek helper."""
+
+    def test_none_returns_none(self):
+        assert clean_greek(None) is None
+
+    def test_nan_returns_none(self):
+        assert clean_greek(float("nan")) is None
+
+    def test_valid_greeks(self):
+        assert clean_greek(0.48) == 0.48
+        assert clean_greek(-0.35) == -0.35
+        assert clean_greek(0.0) == 0.0
+
+
+class TestCalcOptionMid:
+    """Tests for calc_option_mid — only calculated when both bid and ask are valid."""
+
+    def test_valid_bid_and_ask(self):
+        # User example: bid 147.0, ask 156.5 -> mid 151.75
+        assert calc_option_mid(147.0, 156.5) == 151.75
+
+    def test_missing_bid_returns_none(self):
+        assert calc_option_mid(None, 156.5) is None
+
+    def test_missing_ask_returns_none(self):
+        assert calc_option_mid(147.0, None) is None
+
+    def test_both_missing_returns_none(self):
+        assert calc_option_mid(None, None) is None
+
+    def test_negative_bid_or_ask_returns_none(self):
+        assert calc_option_mid(-1.0, 156.5) is None
+        assert calc_option_mid(147.0, -1.0) is None
+
+    def test_nan_returns_none(self):
+        assert calc_option_mid(float("nan"), 156.5) is None
+        assert calc_option_mid(147.0, float("nan")) is None
+
+    def test_zero_bid_with_positive_ask(self):
+        assert calc_option_mid(0.0, 0.10) == 0.05
+
+    def test_zero_bid_and_ask(self):
+        assert calc_option_mid(0.0, 0.0) == 0.0
+
 
 class TestCalcMoneynessPct:
     """Tests for calc_moneyness_pct — percentage deviation from spot."""
@@ -603,6 +717,151 @@ class TestSelectBestOptionChain:
         ]
         best = select_best_option_chain(chains, target_exchange="DTB", expiry="20291231")
         assert best is None
+
+
+class TestCalcBsGreeks:
+    """Tests for calc_bs_greeks — Black-Scholes Greeks calculation."""
+
+    def test_put_delta_atm(self):
+        # S=1450, K=1450, 38 days, IV=32%
+        res = calc_bs_greeks("P", 1450.0, 1450.0, "20261016", 0.32, eval_date="20260908")
+        # ATM Put delta should be close to -0.47 to -0.50
+        assert -0.55 < res["delta"] < -0.45
+        assert res["gamma"] > 0.0
+        assert res["theta"] < 0.0
+        assert res["vega"] > 0.0
+
+    def test_put_delta_otm_and_itm(self):
+        # OTM Put: strike 1300 < spot 1450 -> delta closer to 0 (e.g. -0.15 to -0.20)
+        otm_res = calc_bs_greeks("P", 1450.0, 1300.0, "20261016", 0.32, eval_date="20260908")
+        assert -0.25 < otm_res["delta"] < -0.05
+
+        # ITM Put: strike 1600 > spot 1450 -> delta closer to -1.0 (e.g. -0.75 to -0.85)
+        itm_res = calc_bs_greeks("P", 1450.0, 1600.0, "20261016", 0.32, eval_date="20260908")
+        assert -0.90 < itm_res["delta"] < -0.70
+
+    def test_call_delta_atm(self):
+        res = calc_bs_greeks("C", 1450.0, 1450.0, "20261016", 0.32, eval_date="20260908")
+        # ATM Call delta should be close to 0.50 to 0.55
+        assert 0.45 < res["delta"] < 0.55
+        assert res["gamma"] > 0.0
+        assert res["theta"] < 0.0
+        assert res["vega"] > 0.0
+
+    def test_zero_or_negative_inputs(self):
+        assert calc_bs_greeks("P", 0.0, 1450.0, "20261016", 0.32) == {"delta": 0.0, "gamma": 0.0, "theta": 0.0, "vega": 0.0}
+        assert calc_bs_greeks("P", 1450.0, 0.0, "20261016", 0.32) == {"delta": 0.0, "gamma": 0.0, "theta": 0.0, "vega": 0.0}
+        assert calc_bs_greeks("P", 1450.0, 1450.0, "20261016", 0.0) == {"delta": 0.0, "gamma": 0.0, "theta": 0.0, "vega": 0.0}
+
+    def test_invalid_expiry(self):
+        res = calc_bs_greeks("P", 1450.0, 1450.0, "invalid_date", 0.32)
+        assert res == {"delta": 0.0, "gamma": 0.0, "theta": 0.0, "vega": 0.0}
+
+
+class TestIsMarketOpenForSymbol:
+    """Tests for is_market_open_for_symbol across US, EU, and UK sessions."""
+
+    def test_us_market_open_hours(self):
+        from datetime import datetime, timezone
+        # Wednesday 2026-09-09 14:00 UTC = 10:00 AM EDT (Open)
+        dt_open = datetime(2026, 9, 9, 14, 0, tzinfo=timezone.utc)
+        assert is_market_open_for_symbol(symbol="AAPL", currency="USD", ref_dt=dt_open) is True
+
+        # Wednesday 2026-09-09 04:00 UTC = Midnight EDT (Closed)
+        dt_closed = datetime(2026, 9, 9, 4, 0, tzinfo=timezone.utc)
+        assert is_market_open_for_symbol(symbol="AAPL", currency="USD", ref_dt=dt_closed) is False
+
+        # Saturday 2026-09-12 14:00 UTC (Weekend: Closed)
+        dt_weekend = datetime(2026, 9, 12, 14, 0, tzinfo=timezone.utc)
+        assert is_market_open_for_symbol(symbol="AAPL", currency="USD", ref_dt=dt_weekend) is False
+
+    def test_eu_market_open_hours(self):
+        from datetime import datetime, timezone
+        # Wednesday 2026-09-09 10:00 UTC = 12:00 CEST (Open)
+        dt_open = datetime(2026, 9, 9, 10, 0, tzinfo=timezone.utc)
+        assert is_market_open_for_symbol(symbol="RMS", exchange="EUREX", currency="EUR", ref_dt=dt_open) is True
+
+        # Wednesday 2026-09-09 18:00 UTC = 20:00 CEST (Closed: closes at 17:30 CEST)
+        dt_closed = datetime(2026, 9, 9, 18, 0, tzinfo=timezone.utc)
+        assert is_market_open_for_symbol(symbol="RMS", exchange="EUREX", currency="EUR", ref_dt=dt_closed) is False
+
+    def test_uk_market_open_hours(self):
+        from datetime import datetime, timezone
+        # Wednesday 2026-09-09 10:00 UTC = 11:00 BST (Open)
+        dt_open = datetime(2026, 9, 9, 10, 0, tzinfo=timezone.utc)
+        assert is_market_open_for_symbol(symbol="BATS.L", exchange="LSE", currency="GBP", ref_dt=dt_open) is True
+
+        # Wednesday 2026-09-09 17:00 UTC = 18:00 BST (Closed: closes at 16:30 BST)
+        dt_closed = datetime(2026, 9, 9, 17, 0, tzinfo=timezone.utc)
+        assert is_market_open_for_symbol(symbol="BATS.L", exchange="LSE", currency="GBP", ref_dt=dt_closed) is False
+
+
+class TestDetermineMarketStatuses:
+    """Tests for determine_market_statuses mapping."""
+
+    def test_market_closed_no_quotes_with_greeks(self):
+        # e.g. RMS 1580P after close: bid/ask null, greeks present from model
+        res = determine_market_statuses(is_open=False, has_bid_ask=False, has_greeks=True)
+        assert res["market_data_status"] == "CLOSED"
+        assert res["quote_status"] == "CLOSED"
+        assert res["greeks_status"] == "FROZEN"
+
+    def test_market_closed_with_quotes_and_greeks(self):
+        # e.g. Contract after close with frozen bid/ask
+        res = determine_market_statuses(is_open=False, has_bid_ask=True, has_greeks=True)
+        assert res["market_data_status"] == "CLOSED"
+        assert res["quote_status"] == "FROZEN"
+        assert res["greeks_status"] == "FROZEN"
+
+    def test_market_closed_both_null(self):
+        res = determine_market_statuses(is_open=False, has_bid_ask=False, has_greeks=False)
+        assert res["market_data_status"] == "CLOSED"
+        assert res["quote_status"] == "CLOSED"
+        assert res["greeks_status"] == "CLOSED"
+
+    def test_market_open_live_full(self):
+        res = determine_market_statuses(is_open=True, has_bid_ask=True, has_greeks=True, market_data_type=1)
+        assert res["market_data_status"] == "LIVE"
+        assert res["quote_status"] == "LIVE"
+        assert res["greeks_status"] == "LIVE"
+
+    def test_market_open_live_quotes_frozen_greeks(self):
+        # User example: quote_status: LIVE, greeks_status: FROZEN
+        res = determine_market_statuses(is_open=True, has_bid_ask=True, has_greeks=True, greeks_are_frozen=True)
+        assert res["market_data_status"] == "LIVE"
+        assert res["quote_status"] == "LIVE"
+        assert res["greeks_status"] == "FROZEN"
+
+    def test_market_open_missing_quotes(self):
+        res = determine_market_statuses(is_open=True, has_bid_ask=False, has_greeks=True)
+        assert res["market_data_status"] == "LIVE"
+        assert res["quote_status"] == "UNAVAILABLE"
+        assert res["greeks_status"] == "LIVE"
+
+    def test_market_open_missing_greeks(self):
+        res = determine_market_statuses(is_open=True, has_bid_ask=True, has_greeks=False)
+        assert res["market_data_status"] == "LIVE"
+        assert res["quote_status"] == "LIVE"
+        assert res["greeks_status"] == "UNAVAILABLE"
+
+    def test_market_open_delayed(self):
+        res = determine_market_statuses(is_open=True, has_bid_ask=True, has_greeks=True, market_data_type=3)
+        assert res["market_data_status"] == "DELAYED"
+        assert res["quote_status"] == "DELAYED"
+        assert res["greeks_status"] == "DELAYED"
+
+    def test_db_source_market_closed(self):
+        res = determine_market_statuses(is_open=False, has_bid_ask=False, has_greeks=True, source="db")
+        assert res["market_data_status"] == "CLOSED"
+        assert res["quote_status"] == "CLOSED"
+        assert res["greeks_status"] == "FROZEN"
+
+    def test_cboe_source_market_open(self):
+        res = determine_market_statuses(is_open=True, has_bid_ask=True, has_greeks=True, source="cboe")
+        assert res["market_data_status"] == "DELAYED"
+        assert res["quote_status"] == "DELAYED"
+        assert res["greeks_status"] == "FROZEN"
+
 
 
 
